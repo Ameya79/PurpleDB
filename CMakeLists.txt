@@ -46,6 +46,7 @@ endif()
 # Core library sources
 set(PURPLEDB_CORE_SOURCES
   core/util/slice.cc
+  core/util/status.cc
 )
 
 add_library(purpledb_core STATIC ${PURPLEDB_CORE_SOURCES})
@@ -62,6 +63,7 @@ enable_testing()
 set(PURPLEDB_TEST_SOURCES
   tests/test_main.cc
   tests/slice_test.cc
+  tests/status_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
