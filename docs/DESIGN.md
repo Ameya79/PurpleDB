@@ -266,3 +266,71 @@ The Python exploration prototype demonstrates that:
 3. Unit $L_2$ normalization and dot-product matrix search achieve instant retrieval with zero numerical instability.
 
 The architectural foundation is validated and ready for transition to high-performance C++ storage engine development in Milestone M1.
+
+
+---
+
+# Milestone M1: C++ Foundations & Storage Mechanics
+
+## 1. Non-Owning Memory Views (`Slice` vs. `std::string`)
+In C++, `std::string` manages its own heap memory. Whenever you pass a `std::string` by value or create a substring (`s.substr(start, len)`), a new heap allocation and buffer copy occurs. In an embedded database processing millions of keys and multi-megabyte SSTables:
+- Allocations cause severe heap fragmentation and lock contention on the memory allocator.
+- `Slice` is a **non-owning view**: it holds only `const char* data_` (8 bytes) and `size_t size_` (8 bytes).
+- Passing, copying, or shrinking a `Slice` (`remove_prefix(n)`) takes $O(1)$ operations and zero heap allocations.
+- **Safety Rule**: The underlying memory must outlive the `Slice`.
+
+## 2. Zero-Cost Success Pattern in `Status`
+Throwing and catching C++ exceptions requires stack unwinding, table lookups, and compiler runtime overhead. In high-performance systems:
+- Operations return a `Status` object by value.
+- To eliminate heap allocations on the 99.9% common success path, `Status` holds a single pointer `const char* state_`.
+- On success (`kOk`), `state_ == nullptr`. Returning `Status::OK()` compiles down to loading 0 into a register (`xor eax, eax`).
+- Only when an error occurs is a heap buffer allocated with the message and code.
+
+## 3. Endianness & Hardware Serialization
+CPUs load integers according to native byte order (endianness).
+- On **x86-64 and modern ARM (little-endian)**, the value `0x12345678` is stored in memory as `[0x78, 0x56, 0x34, 0x12]`.
+- Directly casting structs to `char*` and writing to disk creates non-portable files that corrupt when read on systems with different endianness or struct packing.
+- `core/util/coding.h` explicitly serializes numbers with bit shifts:
+  ```cpp
+  buffer[0] = static_cast<uint8_t>(value);
+  buffer[1] = static_cast<uint8_t>(value >> 8);
+  buffer[2] = static_cast<uint8_t>(value >> 16);
+  buffer[3] = static_cast<uint8_t>(value >> 24);
+  ```
+  This is 100% portable across all CPU architectures and compiler optimizations.
+
+## 4. Variable-Byte (Varint / LEB128) Compression
+Database keys and values often have small lengths (e.g. 5 to 64 bytes).
+- Storing length as a standard 32-bit integer uses 4 bytes per record. For 10,000,000 keys, storing 4-byte lengths wastes 30 MB of disk and cache space.
+- Varint stores 7 bits of value per byte. The 8th bit (`0x80`) is a continuation flag:
+  - If value $< 128$: encoded in **1 single byte**.
+  - If value $< 16384$: encoded in **2 bytes**.
+- All decoders must check buffer boundaries (`limit`) to avoid buffer overruns on corrupt inputs.
+
+## 5. Castagnoli CRC-32C and Masking
+Disk drives and memory hardware occasionally experience silent bit flips (bit rot) or partial page writes (torn writes).
+- CRC-32C Castagnoli detects all 1-, 2-, and 3-bit errors in blocks up to 64 KiB.
+- **Masking**: If a block stores its own CRC, and that block is subsequently checksummed by an outer layer, identical checksum values can cancel out. Rotating by 15 bits and adding a constant (`kMaskDelta = 0xa282ead8`) prevents self-canceling checksum collisions.
+
+## 6. Static Registration in C++ Test Frameworks
+Our test harness in `core/util/test_harness.h` uses static initialization:
+```cpp
+#define TEST(suite, name) \
+  void suite##_##name##_Test(); \
+  static ::purpledb::test::TestRegistrar suite##_##name##_Registrar( \
+      #suite, #name, suite##_##name##_Test); \
+  void suite##_##name##_Test()
+```
+When the program starts, the C++ runtime initializes all global and file-scope static variables before `main()` executes. The constructor of `TestRegistrar` registers the function pointer with `TestRunner::Instance()`. `main()` simply calls `TestRunner::Instance().RunAll()`.
+
+---
+
+## What You Should Understand Now (Milestone M1 Concepts)
+1. **Value-Semantic Error Handling (`Status`)**: Why databases avoid exceptions on hot paths, and how a pointer-sized `Status` with null state provides zero-cost success paths.
+2. **Non-Owning Memory Views (`Slice`)**: The memory layout of `const char*` + `size_t`, why it eliminates substring copying, and how to maintain buffer lifetime safety.
+3. **Deterministic Serialization (Little-Endian)**: Why writing raw memory structs to disk breaks portability, and how explicit bit-shifting ensures multi-platform binary compatibility.
+4. **Variable-Byte Integer Compression (LEB128 Varint)**: How the 7-bit continuation flag encodes small integers in 1 byte, saving up to 75% space on metadata.
+5. **CRC-32C Checksums & Masking**: The Castagnoli polynomial for error detection in storage blocks, and why checksum masking prevents self-referential collisions.
+6. **Bounds-Checked Binary Parsing**: How to prevent buffer overflow vulnerabilities by passing pointer and limit boundaries (`p` and `limit`) to all binary decoders.
+7. **Static Registration in Test Frameworks**: How global static initializers register test cases before `main()` without requiring manual test lists.
+8. **Sanitizers (ASan & UBSan)**: How compiler instrumentation detects memory leaks, out-of-bounds array accesses, and undefined behavior at test runtime.
