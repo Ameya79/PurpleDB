@@ -43,10 +43,13 @@ if(ENABLE_TSAN)
   endif()
 endif()
 
+find_package(Threads REQUIRED)
+
 # Core library sources
 set(PURPLEDB_CORE_SOURCES
   core/storage/crc32c.cc
   core/util/coding.cc
+  core/util/logging.cc
   core/util/slice.cc
   core/util/status.cc
 )
@@ -69,10 +72,11 @@ set(PURPLEDB_TEST_SOURCES
   tests/status_test.cc
   tests/crc32c_test.cc
   tests/coding_test.cc
+  tests/logging_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
-target_link_libraries(purpledb_tests PRIVATE purpledb_core)
+target_link_libraries(purpledb_tests PRIVATE purpledb_core Threads::Threads)
 target_include_directories(purpledb_tests PRIVATE
   core/include
   core
