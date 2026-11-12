@@ -1,0 +1,321 @@
+{
+  "version": "1.0",
+  "dataset_name": "PurpleDB M0 Synthetic Golden Benchmark",
+  "description": "Deterministic benchmark suite generated via ffmpeg lavfi for retrieval evaluation",
+  "videos": [
+    {
+      "video_id": "vid_shapes",
+      "filename": "shapes_events.mp4",
+      "duration_sec": 15.0,
+      "segments": [
+        {
+          "start_sec": 0.0,
+          "end_sec": 5.0,
+          "concept": "blue screen with white square"
+        },
+        {
+          "start_sec": 5.0,
+          "end_sec": 10.0,
+          "concept": "bright red screen with green square"
+        },
+        {
+          "start_sec": 10.0,
+          "end_sec": 15.0,
+          "concept": "yellow screen with black square"
+        }
+      ]
+    },
+    {
+      "video_id": "vid_scenic",
+      "filename": "scenic_events.mp4",
+      "duration_sec": 15.0,
+      "segments": [
+        {
+          "start_sec": 0.0,
+          "end_sec": 5.0,
+          "concept": "coral orange sunset sky"
+        },
+        {
+          "start_sec": 5.0,
+          "end_sec": 10.0,
+          "concept": "dark forest green trees foliage"
+        },
+        {
+          "start_sec": 10.0,
+          "end_sec": 15.0,
+          "concept": "deep navy blue ocean waters"
+        }
+      ]
+    },
+    {
+      "video_id": "vid_activity",
+      "filename": "activity_events.mp4",
+      "duration_sec": 15.0,
+      "segments": [
+        {
+          "start_sec": 0.0,
+          "end_sec": 5.0,
+          "concept": "red vehicle car on asphalt grey road"
+        },
+        {
+          "start_sec": 5.0,
+          "end_sec": 10.0,
+          "concept": "white ceramic coffee cup on wooden table"
+        },
+        {
+          "start_sec": 10.0,
+          "end_sec": 15.0,
+          "concept": "person silhouette standing on green lawn grass"
+        }
+      ]
+    },
+    {
+      "video_id": "vid_monochrome",
+      "filename": "monochrome_contrast.mp4",
+      "duration_sec": 12.0,
+      "segments": [
+        {
+          "start_sec": 0.0,
+          "end_sec": 4.0,
+          "concept": "pitch dark black screen darkness"
+        },
+        {
+          "start_sec": 4.0,
+          "end_sec": 8.0,
+          "concept": "pure solid white bright screen"
+        },
+        {
+          "start_sec": 8.0,
+          "end_sec": 12.0,
+          "concept": "neutral gray background"
+        }
+      ]
+    },
+    {
+      "video_id": "vid_vibrant",
+      "filename": "vibrant_palette.mp4",
+      "duration_sec": 12.0,
+      "segments": [
+        {
+          "start_sec": 0.0,
+          "end_sec": 4.0,
+          "concept": "rich royal purple violet background"
+        },
+        {
+          "start_sec": 4.0,
+          "end_sec": 8.0,
+          "concept": "bright cyan turquoise blue screen"
+        },
+        {
+          "start_sec": 8.0,
+          "end_sec": 12.0,
+          "concept": "bright golden yellow background"
+        }
+      ]
+    },
+    {
+      "video_id": "vid_industrial",
+      "filename": "industrial_materials.mp4",
+      "duration_sec": 12.0,
+      "segments": [
+        {
+          "start_sec": 0.0,
+          "end_sec": 4.0,
+          "concept": "metallic silver aluminum surface"
+        },
+        {
+          "start_sec": 4.0,
+          "end_sec": 8.0,
+          "concept": "dark brick red masonry wall"
+        },
+        {
+          "start_sec": 8.0,
+          "end_sec": 12.0,
+          "concept": "midnight slate blue night"
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "query_id": "q01",
+      "query_text": "a blue screen with a white square in the center",
+      "target_video_id": "vid_shapes",
+      "expected_interval": {
+        "start_sec": 0.0,
+        "end_sec": 5.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q02",
+      "query_text": "bright red background with a green square",
+      "target_video_id": "vid_shapes",
+      "expected_interval": {
+        "start_sec": 5.0,
+        "end_sec": 10.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q03",
+      "query_text": "bright yellow screen with a black box",
+      "target_video_id": "vid_shapes",
+      "expected_interval": {
+        "start_sec": 10.0,
+        "end_sec": 15.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q04",
+      "query_text": "warm coral sunset evening sky glow",
+      "target_video_id": "vid_scenic",
+      "expected_interval": {
+        "start_sec": 0.0,
+        "end_sec": 5.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q05",
+      "query_text": "deep dark green forest foliage and trees",
+      "target_video_id": "vid_scenic",
+      "expected_interval": {
+        "start_sec": 5.0,
+        "end_sec": 10.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q06",
+      "query_text": "deep dark navy blue ocean water",
+      "target_video_id": "vid_scenic",
+      "expected_interval": {
+        "start_sec": 10.0,
+        "end_sec": 15.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q07",
+      "query_text": "red car driving on asphalt grey road",
+      "target_video_id": "vid_activity",
+      "expected_interval": {
+        "start_sec": 0.0,
+        "end_sec": 5.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q08",
+      "query_text": "white coffee mug on wooden table",
+      "target_video_id": "vid_activity",
+      "expected_interval": {
+        "start_sec": 5.0,
+        "end_sec": 10.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q09",
+      "query_text": "person standing outdoors on green lawn grass",
+      "target_video_id": "vid_activity",
+      "expected_interval": {
+        "start_sec": 10.0,
+        "end_sec": 15.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q10",
+      "query_text": "completely pitch black dark screen",
+      "target_video_id": "vid_monochrome",
+      "expected_interval": {
+        "start_sec": 0.0,
+        "end_sec": 4.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q11",
+      "query_text": "pure solid white blank screen",
+      "target_video_id": "vid_monochrome",
+      "expected_interval": {
+        "start_sec": 4.0,
+        "end_sec": 8.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q12",
+      "query_text": "neutral medium gray background",
+      "target_video_id": "vid_monochrome",
+      "expected_interval": {
+        "start_sec": 8.0,
+        "end_sec": 12.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q13",
+      "query_text": "vibrant purple violet colored screen",
+      "target_video_id": "vid_vibrant",
+      "expected_interval": {
+        "start_sec": 0.0,
+        "end_sec": 4.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q14",
+      "query_text": "bright cyan turquoise blue background",
+      "target_video_id": "vid_vibrant",
+      "expected_interval": {
+        "start_sec": 4.0,
+        "end_sec": 8.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q15",
+      "query_text": "bright sunny golden yellow background",
+      "target_video_id": "vid_vibrant",
+      "expected_interval": {
+        "start_sec": 8.0,
+        "end_sec": 12.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q16",
+      "query_text": "metallic silver aluminum metal surface",
+      "target_video_id": "vid_industrial",
+      "expected_interval": {
+        "start_sec": 0.0,
+        "end_sec": 4.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q17",
+      "query_text": "brick red masonry wall surface",
+      "target_video_id": "vid_industrial",
+      "expected_interval": {
+        "start_sec": 4.0,
+        "end_sec": 8.0
+      },
+      "tolerance_sec": 1.5
+    },
+    {
+      "query_id": "q18",
+      "query_text": "midnight dark slate blue night",
+      "target_video_id": "vid_industrial",
+      "expected_interval": {
+        "start_sec": 8.0,
+        "end_sec": 12.0
+      },
+      "tolerance_sec": 1.5
+    }
+  ]
+}
