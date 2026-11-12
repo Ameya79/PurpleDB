@@ -46,6 +46,7 @@ endif()
 # Core library sources
 set(PURPLEDB_CORE_SOURCES
   core/storage/crc32c.cc
+  core/util/coding.cc
   core/util/slice.cc
   core/util/status.cc
 )
@@ -54,6 +55,7 @@ add_library(purpledb_core STATIC ${PURPLEDB_CORE_SOURCES})
 
 target_include_directories(purpledb_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
   $<INSTALL_INTERFACE:include>
 )
@@ -66,6 +68,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/slice_test.cc
   tests/status_test.cc
   tests/crc32c_test.cc
+  tests/coding_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
