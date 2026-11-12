@@ -1,0 +1,71 @@
+name: PurpleDB CI
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} (${{ matrix.compiler }}${{ matrix.sanitizer && format(' + {0}', matrix.sanitizer) || '' }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux GCC
+          - os: ubuntu-latest
+            compiler: gcc
+            c_compiler: gcc
+            cxx_compiler: g++
+            cmake_flags: ""
+
+          # Linux Clang + ASan / UBSan
+          - os: ubuntu-latest
+            compiler: clang
+            c_compiler: clang
+            cxx_compiler: clang++
+            sanitizer: "ASan+UBSan"
+            cmake_flags: "-DENABLE_ASAN=ON -DENABLE_UBSAN=ON"
+
+          # macOS Apple Clang
+          - os: macos-latest
+            compiler: clang
+            c_compiler: clang
+            cxx_compiler: clang++
+            cmake_flags: ""
+
+          # Windows MSVC
+          - os: windows-latest
+            compiler: msvc
+            c_compiler: cl
+            cxx_compiler: cl
+            cmake_flags: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Ninja
+        uses: ashutoshvarma/setup-ninja@master
+        with:
+          version: 1.11.1
+
+      - name: Set up MSVC (Windows only)
+        if: matrix.compiler == 'msvc'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure CMake
+        run: >
+          cmake -B build -G "Ninja"
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx_compiler }}
+          ${{ matrix.cmake_flags }}
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run Tests
+        run: ctest --test-dir build --output-on-failure -C Release

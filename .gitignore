@@ -23,6 +23,20 @@ temp_frames/
 .cache/
 fastembed_cache/
 
+# Build directories and binaries
+build/
+build-*/
+cmake-build-*/
+*.exe
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.o
+*.obj
+compile_commands.json
+
 # OS and IDE files
 Thumbs.db
 ehthumbs.db
