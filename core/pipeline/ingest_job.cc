@@ -1,6 +1,7 @@
 #include "core/pipeline/ingest_job.h"
 
 #include <cstring>
+#include "core/query/moment_metadata.h"
 #include "core/storage/crc32c.h"
 #include "core/storage/db_impl.h"
 #include "core/util/coding.h"
@@ -110,7 +111,7 @@ Status IngestPipeline::IngestFrames(const std::string& video_id,
                                     const std::vector<DecodedFrame>& frames,
                                     size_t* out_moments_count) {
   if (frames.empty()) {
-    *out_moments_count = 0;
+    if (out_moments_count) *out_moments_count = 0;
     return Status::OK();
   }
 
@@ -119,7 +120,7 @@ Status IngestPipeline::IngestFrames(const std::string& video_id,
   Status s = GetJobState(video_id, &job);
   if (s.ok() && job.status == JobStatus::kCompleted) {
     // Idempotent: already completed
-    *out_moments_count = job.moments_count;
+    if (out_moments_count) *out_moments_count = job.moments_count;
     return Status::OK();
   }
 
@@ -186,6 +187,16 @@ Status IngestPipeline::IngestFrames(const std::string& video_id,
         index_->db()->Put(Slice("j" + video_id), Slice(job.Serialize()));
         return s;
       }
+
+      MomentMetadata meta;
+      meta.video_id = video_id;
+      meta.moment_id = job.moments_count;
+      meta.start_sec = m.start_sec;
+      meta.end_sec = m.end_sec;
+      meta.thumbnail_path = "";
+      meta.caption = "";
+      index_->db()->Put(Slice("info:" + m_key), Slice(meta.Serialize()));
+
       job.moments_count++;
     }
 
@@ -214,7 +225,9 @@ Status IngestPipeline::IngestFrames(const std::string& video_id,
   }
   index_->Sync();
 
-  *out_moments_count = job.moments_count;
+  if (out_moments_count) {
+    *out_moments_count = job.moments_count;
+  }
   return Status::OK();
 }
 

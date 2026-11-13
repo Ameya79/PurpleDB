@@ -79,6 +79,8 @@ set(PURPLEDB_CORE_SOURCES
   core/pipeline/frame_decoder.cc
   core/pipeline/ingest_job.cc
   core/pipeline/moment_detector.cc
+  core/query/query_engine.cc
+  core/purpledb_c.cc
   core/util/arena.cc
   core/util/coding.cc
   core/util/hash.cc
@@ -138,6 +140,9 @@ set(PURPLEDB_TEST_SOURCES
   tests/frame_decoder_test.cc
   tests/ingest_job_test.cc
   tests/m7_acceptance_test.cc
+  tests/query_engine_test.cc
+  tests/c_abi_test.cc
+  tests/m8_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})

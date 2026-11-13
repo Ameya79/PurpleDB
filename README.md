@@ -121,7 +121,7 @@ Benchmarks measured with `bench/vec_bench.cc` across 5,000 512-dimensional vecto
 | **M5** | Vector Storage & Search | Append-only `.vec` segment files, WiscKey separation, SIMD flat cosine search | `m5-done` |
 | **M6** | Vector Indexing (HNSW) | Multi-layer graph, efConstruction/efSearch, snapshot persistence, over-fetch | `m6-done` |
 | **M7** | Metadata & Ingest Pipeline | Embedder interface, ONNX/API adapters, FFmpeg decode, moment detector, jobs | `m7-done` |
-| **M8** | Query Layer & C ABI | Text/example search, filters, delete video, stats, stable C ABI | Planned |
+| **M8** | Query Layer & C ABI | Text/example search, filters, delete video, stats, stable C ABI | `m8-done` |
 | **M9** | Python Client & v1.0 | pybind11 module, wheels for Linux/macOS/Windows, examples, v1.0 release | Planned |
 
 ---
@@ -147,19 +147,51 @@ cmake --build build --config Release
 ```
 
 ### 2. Run the Test Suite
-The unit and acceptance test suite includes 101 self-contained tests with zero external dependencies:
+The unit and acceptance test suite includes 136 self-contained tests across all modules and acceptance criteria with zero external dependencies:
 ```bash
 ./build/purpledb_tests
 ```
 
 Filter for specific test suites:
 ```bash
-./build/purpledb_tests M4AcceptanceTest
-./build/purpledb_tests DBTest
-./build/purpledb_tests FilterPolicyTest
+./build/purpledb_tests M8AcceptanceTest
+./build/purpledb_tests QueryEngineTest
+./build/purpledb_tests CAbiTest
 ```
 
-### 3. Run Storage Engine Benchmarks
+### 3. C ABI Quickstart (C99 / C++17)
+
+```c
+#include <purpledb/purpledb_c.h>
+#include <stdio.h>
+
+int main() {
+    pdb_t* db = NULL;
+    pdb_open("./mydb", "local", &db);
+
+    char video_id[128];
+    pdb_add_video(db, "vacation.mp4", video_id, sizeof(video_id));
+
+    pdb_results_t* results = NULL;
+    pdb_search_text(db, "swimming in turquoise water", 5, NULL, &results);
+
+    int count = pdb_results_count(results);
+    for (int i = 0; i < count; ++i) {
+        const char* vid = NULL;
+        uint32_t moment_id = 0;
+        double start_sec = 0.0, end_sec = 0.0;
+        float score = 0.0f;
+        pdb_results_get(results, i, &vid, &moment_id, &start_sec, &end_sec, &score, NULL, NULL);
+        printf("Hit: %s (%.1fs - %.1fs) score=%.3f\n", vid, start_sec, end_sec, score);
+    }
+
+    pdb_results_destroy(results);
+    pdb_close(db);
+    return 0;
+}
+```
+
+### 4. Run Storage Engine Benchmarks
 ```bash
 ./build/db_bench 20000
 ```
@@ -189,13 +221,18 @@ PurpleDB/
 │   ├── vec_bench.cc         # Vector benchmark (ingest, SIMD brute-force search, segment scan)
 │   └── results/             # Real measured benchmark outputs across milestones
 ├── core/
-│   ├── include/purpledb/    # Public C++ API headers
+│   ├── include/purpledb/    # Public C++ and C ABI headers
+│   │   ├── purpledb_c.h     # Stable C ABI header (FFI boundary, opaque handles)
 │   │   ├── db.h             # Core DB interface (Put, Get, Delete, NewIterator, GetSnapshot)
 │   │   ├── filter_policy.h  # Bloom filter policy abstraction
 │   │   ├── iterator.h       # Iterator interface
 │   │   ├── slice.h          # Zero-copy string/binary slice view
 │   │   ├── status.h         # Memory-optimized status results
 │   │   └── write_batch.h    # Atomic multi-mutation batches
+│   ├── query/               # Multimodal query engine
+│   │   ├── query_engine.cc/h # Multimodal search, metadata hydration, and cascade deletes
+│   │   └── moment_metadata.h # Persistent moment descriptor serialization
+│   ├── purpledb_c.cc        # Stable C ABI implementation with zero-exception shield
 │   ├── storage/             # Engine internals
 │   │   ├── block.cc/h       # SSTable data block reader
 │   │   ├── block_builder.cc/h # Prefix delta compression block builder
@@ -240,7 +277,7 @@ PurpleDB/
 │   ├── DECISIONS.md         # Architectural Decision Records (ADRs) & benchmark logs
 │   └── LIMITATIONS.md       # Operational boundaries and concurrency constraints
 ├── prototype/               # Milestone M0 Python prototype
-└── tests/                   # Micro test suite (123 unit & acceptance tests)
+└── tests/                   # Micro test suite (136 unit & acceptance tests)
 ```
 
 ---
