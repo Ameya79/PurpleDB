@@ -69,6 +69,7 @@ set(PURPLEDB_CORE_SOURCES
   core/storage/wal_reader.cc
   core/storage/wal_writer.cc
   core/storage/write_batch.cc
+  core/vector/distance.cc
   core/util/arena.cc
   core/util/coding.cc
   core/util/hash.cc
@@ -114,6 +115,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/m2_acceptance_test.cc
   tests/m3_acceptance_test.cc
   tests/m4_acceptance_test.cc
+  tests/distance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
