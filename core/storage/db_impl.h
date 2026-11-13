@@ -6,6 +6,7 @@
 #include "core/storage/cache.h"
 #include "core/storage/env.h"
 #include "core/storage/memtable.h"
+#include "core/storage/snapshot.h"
 #include "core/storage/version_set.h"
 #include "core/storage/wal_writer.h"
 #include "purpledb/db.h"
@@ -21,6 +22,10 @@ class DBImpl : public DB {
   Status Delete(const WriteOptions& options, const Slice& key) override;
   Status Write(const WriteOptions& options, WriteBatch* updates) override;
   Status Get(const ReadOptions& options, const Slice& key, std::string* value) override;
+
+  const Snapshot* GetSnapshot() override;
+  void ReleaseSnapshot(const Snapshot* snapshot) override;
+  std::unique_ptr<Iterator> NewIterator(const ReadOptions& options) override;
 
   // Recover existing database files or initialize a fresh database
   Status Recover();
@@ -45,6 +50,7 @@ class DBImpl : public DB {
   uint64_t log_number_{0};
   SequenceNumber last_sequence_{0};
   std::shared_ptr<Cache> block_cache_;
+  SnapshotList snapshots_;
 };
 
 }  // namespace purpledb

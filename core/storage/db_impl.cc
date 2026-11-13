@@ -1,7 +1,9 @@
 #include "core/storage/db_impl.h"
 
 #include <algorithm>
+#include "core/storage/db_iter.h"
 #include "core/storage/filename.h"
+#include "core/storage/merger.h"
 #include "core/storage/table_builder.h"
 #include "core/storage/wal_reader.h"
 #include "core/util/logging.h"
@@ -310,7 +312,9 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
 Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::string* value) {
   std::lock_guard<std::mutex> lock(mutex_);
-  const SequenceNumber snapshot_seq = (options.snapshot == 0) ? last_sequence_ : options.snapshot;
+  const SequenceNumber snapshot_seq = (options.snapshot != nullptr)
+      ? static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number()
+      : last_sequence_;
 
   Status s;
   // 1. Check active MemTable
@@ -329,6 +333,44 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::string* va
   }
 
   return Status::NotFound(key, "key not found");
+}
+
+const Snapshot* DBImpl::GetSnapshot() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return snapshots_.New(last_sequence_);
+}
+
+void DBImpl::ReleaseSnapshot(const Snapshot* snapshot) {
+  if (snapshot == nullptr) return;
+  std::lock_guard<std::mutex> lock(mutex_);
+  snapshots_.Delete(static_cast<const SnapshotImpl*>(snapshot));
+}
+
+std::unique_ptr<Iterator> DBImpl::NewIterator(const ReadOptions& options) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  const SequenceNumber snapshot_seq = (options.snapshot != nullptr)
+      ? static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number()
+      : last_sequence_;
+
+  std::vector<std::unique_ptr<Iterator>> children;
+  children.push_back(mem_->NewIterator());
+  if (imm_ != nullptr) {
+    children.push_back(imm_->NewIterator());
+  }
+
+  // Add L0 SSTables
+  static const InternalKeyBlockComparator kInternalKeyBlockComparator;
+  Version* current = versions_->current();
+  for (const auto& f : current->files(0)) {
+    std::unique_ptr<Table> table;
+    if (versions_->GetTable(f.number, f.file_size, &table).ok()) {
+      std::shared_ptr<Table> shared_table = std::move(table);
+      children.push_back(Table::NewIterator(shared_table, &kInternalKeyBlockComparator));
+    }
+  }
+
+  auto internal_iter = NewMergingIterator(&kInternalKeyBlockComparator, std::move(children));
+  return NewDBIterator(std::move(internal_iter), snapshot_seq);
 }
 
 }  // namespace purpledb

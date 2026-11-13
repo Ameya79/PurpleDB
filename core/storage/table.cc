@@ -12,9 +12,11 @@ namespace {
 
 class TwoLevelIterator : public Iterator {
  public:
-  TwoLevelIterator(const Table* table, std::unique_ptr<Iterator> index_iter,
+  TwoLevelIterator(const Table* table, std::shared_ptr<const Table> owned_table,
+                   std::unique_ptr<Iterator> index_iter,
                    const Block::Comparator* cmp)
       : table_(table),
+        owned_table_(std::move(owned_table)),
         index_iter_(std::move(index_iter)),
         cmp_(cmp),
         status_(Status::OK()) {}
@@ -134,6 +136,7 @@ class TwoLevelIterator : public Iterator {
   }
 
   const Table* table_;
+  std::shared_ptr<const Table> owned_table_;
   std::unique_ptr<Iterator> index_iter_;
   const Block::Comparator* cmp_;
   std::unique_ptr<Block> current_data_block_;
@@ -287,7 +290,14 @@ Status Table::ReadBlock(const BlockHandle& handle, std::unique_ptr<Block>* resul
 }
 
 std::unique_ptr<Iterator> Table::NewIterator(const Block::Comparator* cmp) const {
-  return std::make_unique<TwoLevelIterator>(this, index_block_->NewIterator(cmp), cmp);
+  return std::make_unique<TwoLevelIterator>(this, nullptr, index_block_->NewIterator(cmp), cmp);
+}
+
+std::unique_ptr<Iterator> Table::NewIterator(std::shared_ptr<const Table> table,
+                                             const Block::Comparator* cmp) {
+  if (table == nullptr) return NewEmptyIterator();
+  const Table* raw = table.get();
+  return std::make_unique<TwoLevelIterator>(raw, std::move(table), raw->index_block()->NewIterator(cmp), cmp);
 }
 
 bool Table::InternalGet(const Slice& key, const Block::Comparator* cmp,

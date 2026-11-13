@@ -266,4 +266,111 @@ TEST(DBTest, OverlappingL0Precedence) {
   env->DeleteDir(dbname);
 }
 
+TEST(DBTest, SnapshotIsolation) {
+  Env* env = Env::Default();
+  std::string dbname = "test_db_snapshot";
+  env->DeleteDir(dbname);
+
+  Options options;
+  options.create_if_missing = true;
+  std::unique_ptr<DB> db;
+  ASSERT_STATUS_OK(DB::Open(options, dbname, &db));
+
+  ASSERT_STATUS_OK(db->Put(Slice("k1"), Slice("v1")));
+  ASSERT_STATUS_OK(db->Put(Slice("k2"), Slice("v2")));
+
+  // Take snapshot at state {k1: v1, k2: v2}
+  const Snapshot* snap1 = db->GetSnapshot();
+  ASSERT_TRUE(snap1 != nullptr);
+
+  // Subsequent mutations
+  ASSERT_STATUS_OK(db->Put(Slice("k1"), Slice("v1_new")));
+  ASSERT_STATUS_OK(db->Delete(Slice("k2")));
+  ASSERT_STATUS_OK(db->Put(Slice("k3"), Slice("v3")));
+
+  // 1. Current reads reflect latest mutations
+  std::string val;
+  ASSERT_STATUS_OK(db->Get(Slice("k1"), &val));
+  ASSERT_EQ(val, "v1_new");
+
+  Status s = db->Get(Slice("k2"), &val);
+  ASSERT_TRUE(s.IsNotFound());
+
+  ASSERT_STATUS_OK(db->Get(Slice("k3"), &val));
+  ASSERT_EQ(val, "v3");
+
+  // 2. Snapshot reads reflect immutable historical state
+  ReadOptions snap_opts;
+  snap_opts.snapshot = snap1;
+
+  ASSERT_STATUS_OK(db->Get(snap_opts, Slice("k1"), &val));
+  ASSERT_EQ(val, "v1");
+
+  ASSERT_STATUS_OK(db->Get(snap_opts, Slice("k2"), &val));
+  ASSERT_EQ(val, "v2");
+
+  s = db->Get(snap_opts, Slice("k3"), &val);
+  ASSERT_TRUE(s.IsNotFound());
+
+  db->ReleaseSnapshot(snap1);
+  db.reset();
+  env->DeleteDir(dbname);
+}
+
+TEST(DBTest, IteratorTraversalAcrossMemTableAndSSTables) {
+  Env* env = Env::Default();
+  std::string dbname = "test_db_iter_traversal";
+  env->DeleteDir(dbname);
+
+  Options options;
+  options.create_if_missing = true;
+  std::unique_ptr<DB> db;
+  ASSERT_STATUS_OK(DB::Open(options, dbname, &db));
+  DBImpl* impl = static_cast<DBImpl*>(db.get());
+
+  // L0 SSTable: {a: 1, c: 3}
+  ASSERT_STATUS_OK(db->Put(Slice("a"), Slice("1")));
+  ASSERT_STATUS_OK(db->Put(Slice("c"), Slice("3")));
+  ASSERT_STATUS_OK(impl->FlushMemTable());
+
+  // MemTable: {b: 2, d: 4, e: 5, delete c}
+  ASSERT_STATUS_OK(db->Put(Slice("b"), Slice("2")));
+  ASSERT_STATUS_OK(db->Put(Slice("d"), Slice("4")));
+  ASSERT_STATUS_OK(db->Put(Slice("e"), Slice("5")));
+  ASSERT_STATUS_OK(db->Delete(Slice("c")));
+
+  auto iter = db->NewIterator(ReadOptions());
+  ASSERT_TRUE(iter != nullptr);
+
+  // Forward scan: must see a, b, d, e (c is deleted)
+  std::vector<std::pair<std::string, std::string>> entries;
+  for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
+    entries.push_back({iter->key().ToString(), iter->value().ToString()});
+  }
+
+  ASSERT_EQ(entries.size(), 4u);
+  ASSERT_EQ(entries[0].first, "a");
+  ASSERT_EQ(entries[0].second, "1");
+  ASSERT_EQ(entries[1].first, "b");
+  ASSERT_EQ(entries[1].second, "2");
+  ASSERT_EQ(entries[2].first, "d");
+  ASSERT_EQ(entries[2].second, "4");
+  ASSERT_EQ(entries[3].first, "e");
+  ASSERT_EQ(entries[3].second, "5");
+
+  // Seek("c") should land on "d"
+  iter->Seek(Slice("c"));
+  ASSERT_TRUE(iter->Valid());
+  ASSERT_EQ(iter->key(), Slice("d"));
+
+  // SeekToLast() should land on "e"
+  iter->SeekToLast();
+  ASSERT_TRUE(iter->Valid());
+  ASSERT_EQ(iter->key(), Slice("e"));
+
+  iter.reset();
+  db.reset();
+  env->DeleteDir(dbname);
+}
+
 }  // namespace purpledb

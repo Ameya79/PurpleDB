@@ -31,6 +31,10 @@ class Table {
   // Returns a two-level iterator over all entries in the table.
   std::unique_ptr<Iterator> NewIterator(const Block::Comparator* cmp = nullptr) const;
 
+  // Returns a two-level iterator that keeps the Table alive via shared_ptr.
+  static std::unique_ptr<Iterator> NewIterator(std::shared_ptr<const Table> table,
+                                               const Block::Comparator* cmp = nullptr);
+
   // Reads a block identified by handle and verifies its checksum.
   Status ReadBlock(const BlockHandle& handle, std::unique_ptr<Block>* result) const;
 
