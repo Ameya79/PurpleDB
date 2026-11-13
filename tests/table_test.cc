@@ -26,7 +26,7 @@ TEST(TableTest, EmptyTable) {
   ASSERT_STATUS_OK(env->NewRandomAccessFile(fname, &rfile));
 
   std::unique_ptr<Table> table;
-  ASSERT_STATUS_OK(Table::Open(rfile.get(), fsize, &table));
+  ASSERT_STATUS_OK(Table::Open(std::move(rfile), fsize, &table));
 
   auto iter = table->NewIterator();
   ASSERT_FALSE(iter->Valid());
@@ -38,7 +38,7 @@ TEST(TableTest, EmptyTable) {
   ASSERT_FALSE(iter->Valid());
 
   // Clean up
-  rfile.reset();
+  table.reset();
   env->DeleteFile(fname);
 }
 
@@ -76,7 +76,7 @@ TEST(TableTest, MultiBlockReadWriteAndIterate) {
   ASSERT_STATUS_OK(env->NewRandomAccessFile(fname, &rfile));
 
   std::unique_ptr<Table> table;
-  ASSERT_STATUS_OK(Table::Open(rfile.get(), fsize, &table));
+  ASSERT_STATUS_OK(Table::Open(std::move(rfile), fsize, &table));
 
   auto iter = table->NewIterator();
 
@@ -120,7 +120,7 @@ TEST(TableTest, MultiBlockReadWriteAndIterate) {
   ASSERT_FALSE(iter->Valid());
 
   // Clean up
-  rfile.reset();
+  table.reset();
   env->DeleteFile(fname);
 }
 
@@ -162,7 +162,7 @@ TEST(TableTest, CorruptionDetection) {
   std::unique_ptr<RandomAccessFile> rfile;
   ASSERT_STATUS_OK(env->NewRandomAccessFile(fname, &rfile));
   std::unique_ptr<Table> table;
-  ASSERT_STATUS_OK(Table::Open(rfile.get(), fsize, &table));
+  ASSERT_STATUS_OK(Table::Open(std::move(rfile), fsize, &table));
 
   auto iter = table->NewIterator();
   iter->SeekToFirst();
@@ -171,7 +171,7 @@ TEST(TableTest, CorruptionDetection) {
   ASSERT_TRUE(iter->status().IsCorruption());
 
   // Clean up
-  rfile.reset();
+  table.reset();
   env->DeleteFile(fname);
 }
 

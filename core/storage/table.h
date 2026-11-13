@@ -16,7 +16,7 @@ namespace purpledb {
  */
 class Table {
  public:
-  static Status Open(RandomAccessFile* file, uint64_t size,
+  static Status Open(std::unique_ptr<RandomAccessFile> file, uint64_t size,
                      std::unique_ptr<Table>* table);
 
   ~Table();
@@ -34,9 +34,10 @@ class Table {
   const Footer& footer() const { return footer_; }
 
  private:
-  Table(RandomAccessFile* file, Footer footer, std::unique_ptr<Block> index_block);
+  Table(std::unique_ptr<RandomAccessFile> file, Footer footer,
+        std::unique_ptr<Block> index_block);
 
-  RandomAccessFile* file_;
+  std::unique_ptr<RandomAccessFile> file_;
   Footer footer_;
   std::unique_ptr<Block> index_block_;
 };

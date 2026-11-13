@@ -53,10 +53,13 @@ set(PURPLEDB_CORE_SOURCES
   core/storage/crc32c.cc
   core/storage/db_impl.cc
   core/storage/env.cc
+  core/storage/filename.cc
   core/storage/format.cc
   core/storage/memtable.cc
   core/storage/table.cc
   core/storage/table_builder.cc
+  core/storage/version_edit.cc
+  core/storage/version_set.cc
   core/storage/wal_reader.cc
   core/storage/wal_writer.cc
   core/storage/write_batch.cc
@@ -92,6 +95,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/block_test.cc
   tests/table_test.cc
   tests/cache_test.cc
+  tests/version_set_test.cc
   tests/env_test.cc
   tests/wal_test.cc
   tests/write_batch_test.cc

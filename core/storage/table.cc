@@ -141,12 +141,14 @@ class TwoLevelIterator : public Iterator {
 
 }  // namespace
 
-Table::Table(RandomAccessFile* file, Footer footer, std::unique_ptr<Block> index_block)
-    : file_(file), footer_(footer), index_block_(std::move(index_block)) {}
+Table::Table(std::unique_ptr<RandomAccessFile> file, Footer footer,
+             std::unique_ptr<Block> index_block)
+    : file_(std::move(file)), footer_(footer), index_block_(std::move(index_block)) {}
 
 Table::~Table() = default;
 
-Status Table::Open(RandomAccessFile* file, uint64_t size, std::unique_ptr<Table>* table) {
+Status Table::Open(std::unique_ptr<RandomAccessFile> file, uint64_t size,
+                   std::unique_ptr<Table>* table) {
   table->reset();
   if (size < Footer::kEncodedLength) {
     return Status::Corruption("file too short to be an SSTable");
@@ -189,7 +191,7 @@ Status Table::Open(RandomAccessFile* file, uint64_t size, std::unique_ptr<Table>
   }
 
   index_block = std::make_unique<Block>(buf, n, true);
-  table->reset(new Table(file, footer, std::move(index_block)));
+  table->reset(new Table(std::move(file), footer, std::move(index_block)));
   return Status::OK();
 }
 
