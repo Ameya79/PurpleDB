@@ -11,6 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Compiler warnings
 if(MSVC)
   add_compile_options(/W4 /permissive-)
+  add_compile_definitions(NOMINMAX _CRT_SECURE_NO_WARNINGS)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
