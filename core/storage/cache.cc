@@ -136,6 +136,7 @@ class HandleTable {
       }
     }
     assert(elems_ == count);
+    (void)count;
     delete[] list_;
     list_ = new_list;
     length_ = new_length;

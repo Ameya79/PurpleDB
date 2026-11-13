@@ -94,6 +94,7 @@ set(PURPLEDB_CORE_SOURCES
 add_library(purpledb_core STATIC ${PURPLEDB_CORE_SOURCES})
 
 target_include_directories(purpledb_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
@@ -148,8 +149,10 @@ set(PURPLEDB_TEST_SOURCES
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
 target_link_libraries(purpledb_tests PRIVATE purpledb_core Threads::Threads)
 target_include_directories(purpledb_tests PRIVATE
+  include
   core/include
   core
+  .
 )
 
 add_test(NAME purpledb_tests COMMAND purpledb_tests)

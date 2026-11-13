@@ -1,5 +1,6 @@
 #include "core/query/query_engine.h"
 #include "core/embed/local_embedder.h"
+#include "core/pipeline/frame_decoder.h"
 #include "util/test_harness.h"
 
 #include <vector>
@@ -186,3 +187,4 @@ TEST(QueryEngineTest, DeleteVideoCascading) {
 
 }  // namespace test
 }  // namespace purpledb
+
