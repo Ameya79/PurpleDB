@@ -59,6 +59,10 @@ Status FrameDecoder::ExtractFrames(const std::string& video_path,
     return Status::NotFound("Video file not found: " + video_path);
   }
 
+  if (video_path.size() >= 6 && video_path.substr(video_path.size() - 6) == ".synth") {
+    return GenerateSyntheticFrames(10, options_.fps, options_.scale_width, options_.scale_height, out_frames);
+  }
+
   std::string ffmpeg_bin = ResolveFFmpegPath();
 
   // Create isolated temporary directory

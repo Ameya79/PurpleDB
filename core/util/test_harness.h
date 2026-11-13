@@ -41,11 +41,11 @@ class TestRunner {
       }
     }
 
-    std::cout << "[==========] Running " << to_run.size() << " test(s).\n";
+    std::cout << "[==========] Running " << to_run.size() << " test(s)." << std::endl;
     auto start = std::chrono::high_resolution_clock::now();
 
     for (const auto& t : to_run) {
-      std::cout << "[ RUN      ] " << t.suite << "." << t.name << "\n";
+      std::cout << "[ RUN      ] " << t.suite << "." << t.name << std::endl;
       current_failed_ = false;
       current_failure_msg_.clear();
       try {
@@ -59,13 +59,13 @@ class TestRunner {
       }
 
       if (current_failed_) {
-        std::cout << "[  FAILED  ] " << t.suite << "." << t.name << "\n";
+        std::cout << "[  FAILED  ] " << t.suite << "." << t.name << std::endl;
         if (!current_failure_msg_.empty()) {
-          std::cout << "             " << current_failure_msg_ << "\n";
+          std::cout << "             " << current_failure_msg_ << std::endl;
         }
         failed++;
       } else {
-        std::cout << "[       OK ] " << t.suite << "." << t.name << "\n";
+        std::cout << "[       OK ] " << t.suite << "." << t.name << std::endl;
         passed++;
       }
     }
