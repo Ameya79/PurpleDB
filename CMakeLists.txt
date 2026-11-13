@@ -72,6 +72,7 @@ set(PURPLEDB_CORE_SOURCES
   core/vector/distance.cc
   core/vector/delete_bitmap.cc
   core/vector/vector_segment.cc
+  core/vector/vector_index.cc
   core/util/arena.cc
   core/util/coding.cc
   core/util/hash.cc
@@ -120,6 +121,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/distance_test.cc
   tests/delete_bitmap_test.cc
   tests/vector_segment_test.cc
+  tests/vector_index_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
