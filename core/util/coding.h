@@ -28,13 +28,21 @@ namespace purpledb {
  */
 
 // Fixed-width encoders
+void EncodeFixed16(char* dst, uint16_t value);
 void EncodeFixed32(char* dst, uint32_t value);
 void EncodeFixed64(char* dst, uint64_t value);
 
+void PutFixed16(std::string* dst, uint16_t value);
 void PutFixed32(std::string* dst, uint32_t value);
 void PutFixed64(std::string* dst, uint64_t value);
 
 // Fixed-width decoders
+inline uint16_t DecodeFixed16(const char* ptr) {
+  const auto* const buffer = reinterpret_cast<const uint8_t*>(ptr);
+  return static_cast<uint16_t>(buffer[0]) |
+         (static_cast<uint16_t>(buffer[1]) << 8);
+}
+
 inline uint32_t DecodeFixed32(const char* ptr) {
   const auto* const buffer = reinterpret_cast<const uint8_t*>(ptr);
   return (static_cast<uint32_t>(buffer[0])) |
