@@ -137,6 +137,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/moment_detector_test.cc
   tests/frame_decoder_test.cc
   tests/ingest_job_test.cc
+  tests/m7_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})

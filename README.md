@@ -120,7 +120,7 @@ Benchmarks measured with `bench/vec_bench.cc` across 5,000 512-dimensional vecto
 | **M4** | Compaction & Bloom Filters | Leveled compaction, Bloom filters, K-way merge, snapshots, write throttling | `m4-done` |
 | **M5** | Vector Storage & Search | Append-only `.vec` segment files, WiscKey separation, SIMD flat cosine search | `m5-done` |
 | **M6** | Vector Indexing (HNSW) | Multi-layer graph, efConstruction/efSearch, snapshot persistence, over-fetch | `m6-done` |
-| **M7** | Metadata & Ingest Pipeline | Embedder interface, ONNX Runtime CLIP adapter, FFmpeg subprocess, moments | Planned |
+| **M7** | Metadata & Ingest Pipeline | Embedder interface, ONNX/API adapters, FFmpeg decode, moment detector, jobs | `m7-done` |
 | **M8** | Query Layer & C ABI | Text/example search, filters, delete video, stats, stable C ABI | Planned |
 | **M9** | Python Client & v1.0 | pybind11 module, wheels for Linux/macOS/Windows, examples, v1.0 release | Planned |
 
@@ -219,11 +219,20 @@ PurpleDB/
 │   │   ├── hnsw.cc/h        # Hierarchical Navigable Small World proximity graph
 │   │   ├── vector_index.cc/h # Unified LSM KV metadata and vector store
 │   │   └── vector_segment.cc/h # Append-only .vec segment writer & reader
+│   ├── embed/               # Multimodal embedding adapters
+│   │   ├── embedder.h       # Abstract Embedder & ImageRef interface
+│   │   ├── api_adapter.cc/h # Cloud API adapter with jittered backoff & rate limiting
+│   │   └── local_embedder.cc/h # Local inference & semantic projection adapter
+│   ├── pipeline/            # Automated video ingestion pipeline
+│   │   ├── frame_decoder.cc/h # Subprocess FFmpeg frame extraction & downscaling
+│   │   ├── moment_detector.cc/h # Anchor-based moment clustering & medoids
+│   │   └── ingest_job.cc/h  # Resumable atomic batch ingest & LSM job state
 │   └── util/                # Core utilities
 │       ├── arena.cc/h       # 4 KiB bump-pointer memory allocator
 │       ├── coding.cc/h      # Little-Endian Fixed32/64 and Varint32/64 encoders
 │       ├── crc32c.cc/h      # Castagnoli CRC-32C checksum implementation
-│       └── hash.cc/h        # MurmurHash2 implementation
+│       ├── hash.cc/h        # MurmurHash2 implementation
+│       └── sha256.cc/h      # FIPS 180-4 SHA-256 content addressing
 ├── docs/                    # Technical architecture & versioned specifications
 │   ├── PRD.md               # Product Requirements Document & milestone specifications
 │   ├── DESIGN.md            # In-depth architectural designs & educational concepts
@@ -231,7 +240,7 @@ PurpleDB/
 │   ├── DECISIONS.md         # Architectural Decision Records (ADRs) & benchmark logs
 │   └── LIMITATIONS.md       # Operational boundaries and concurrency constraints
 ├── prototype/               # Milestone M0 Python prototype
-└── tests/                   # Micro test suite (101 unit & acceptance tests)
+└── tests/                   # Micro test suite (123 unit & acceptance tests)
 ```
 
 ---
