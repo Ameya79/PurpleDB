@@ -47,14 +47,25 @@ find_package(Threads REQUIRED)
 
 # Core library sources
 set(PURPLEDB_CORE_SOURCES
+  core/storage/block.cc
+  core/storage/block_builder.cc
+  core/storage/cache.cc
   core/storage/crc32c.cc
   core/storage/db_impl.cc
   core/storage/env.cc
+  core/storage/filename.cc
+  core/storage/format.cc
   core/storage/memtable.cc
+  core/storage/table.cc
+  core/storage/table_builder.cc
+  core/storage/version_edit.cc
+  core/storage/version_set.cc
   core/storage/wal_reader.cc
   core/storage/wal_writer.cc
   core/storage/write_batch.cc
+  core/util/arena.cc
   core/util/coding.cc
+  core/util/iterator.cc
   core/util/logging.cc
   core/util/slice.cc
   core/util/status.cc
@@ -79,12 +90,19 @@ set(PURPLEDB_TEST_SOURCES
   tests/crc32c_test.cc
   tests/coding_test.cc
   tests/logging_test.cc
+  tests/arena_test.cc
+  tests/skiplist_test.cc
+  tests/block_test.cc
+  tests/table_test.cc
+  tests/cache_test.cc
+  tests/version_set_test.cc
   tests/env_test.cc
   tests/wal_test.cc
   tests/write_batch_test.cc
   tests/memtable_test.cc
   tests/db_test.cc
   tests/m2_acceptance_test.cc
+  tests/m3_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
@@ -95,3 +113,11 @@ target_include_directories(purpledb_tests PRIVATE
 )
 
 add_test(NAME purpledb_tests COMMAND purpledb_tests)
+
+# Benchmarks
+add_executable(db_bench bench/db_bench.cc)
+target_link_libraries(db_bench PRIVATE purpledb_core Threads::Threads)
+target_include_directories(db_bench PRIVATE
+  core/include
+  core
+)

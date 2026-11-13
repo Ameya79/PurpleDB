@@ -6,8 +6,12 @@
 #include <algorithm>
 
 #if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#undef DeleteFile
 #include <io.h>
 #else
+#include <fcntl.h>
 #include <unistd.h>
 #endif
 
@@ -53,6 +57,69 @@ class StdioSequentialFile : public SequentialFile {
   std::FILE* file_;
 };
 
+#if defined(_WIN32)
+class WindowsRandomAccessFile : public RandomAccessFile {
+ public:
+  WindowsRandomAccessFile(std::string fname, HANDLE handle)
+      : filename_(std::move(fname)), handle_(handle) {}
+
+  ~WindowsRandomAccessFile() override {
+    if (handle_ != INVALID_HANDLE_VALUE) {
+      ::CloseHandle(handle_);
+    }
+  }
+
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch) const override {
+    OVERLAPPED ol;
+    std::memset(&ol, 0, sizeof(ol));
+    ol.Offset = static_cast<DWORD>(offset & 0xffffffff);
+    ol.OffsetHigh = static_cast<DWORD>(offset >> 32);
+
+    DWORD bytes_read = 0;
+    if (!::ReadFile(handle_, scratch, static_cast<DWORD>(n), &bytes_read, &ol)) {
+      DWORD err = ::GetLastError();
+      if (err != ERROR_HANDLE_EOF) {
+        return Status::IOError(filename_, "ReadFile failed");
+      }
+    }
+    *result = Slice(scratch, bytes_read);
+    return Status::OK();
+  }
+
+ private:
+  std::string filename_;
+  HANDLE handle_;
+};
+#else
+class PosixRandomAccessFile : public RandomAccessFile {
+ public:
+  PosixRandomAccessFile(std::string fname, int fd)
+      : filename_(std::move(fname)), fd_(fd) {}
+
+  ~PosixRandomAccessFile() override {
+    if (fd_ >= 0) {
+      ::close(fd_);
+    }
+  }
+
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch) const override {
+    ssize_t r = ::pread(fd_, scratch, n, static_cast<off_t>(offset));
+    if (r < 0) {
+      return Status::IOError(filename_, "pread failed");
+    }
+    *result = Slice(scratch, r);
+    return Status::OK();
+  }
+
+ private:
+  std::string filename_;
+  int fd_;
+};
+#endif
+
+// 64 KiB buffer for sequential writes
+constexpr size_t kWritableFileBufferSize = 65536;
+
 class StdioWritableFile : public WritableFile {
  public:
   StdioWritableFile(std::string fname, std::FILE* f)
@@ -85,14 +152,14 @@ class StdioWritableFile : public WritableFile {
       return s;
     }
 
-    // Direct write if remaining data is larger than buffer
-    if (write_size >= kWritableFileBufferSize) {
-      return WriteUnbuffered(write_data, write_size);
+    // Write large chunks directly
+    if (write_size < kWritableFileBufferSize) {
+      std::memcpy(buf_, write_data, write_size);
+      pos_ = write_size;
+      return Status::OK();
     }
 
-    std::memcpy(buf_, write_data, write_size);
-    pos_ = write_size;
-    return Status::OK();
+    return WriteUnbuffered(write_data, write_size);
   }
 
   Status Flush() override {
@@ -111,22 +178,39 @@ class StdioWritableFile : public WritableFile {
     if (!s.ok()) {
       return s;
     }
+
 #if defined(_WIN32)
     int fd = _fileno(file_);
-    if (fd >= 0 && _commit(fd) != 0) {
-      return Status::IOError(filename_, "_commit failed");
+    if (fd < 0) {
+      return Status::IOError(filename_, "_fileno failed");
+    }
+    HANDLE h = reinterpret_cast<HANDLE>(_get_osfhandle(fd));
+    if (h == INVALID_HANDLE_VALUE) {
+      return Status::IOError(filename_, "_get_osfhandle failed");
+    }
+    if (!FlushFileBuffers(h)) {
+      return Status::IOError(filename_, "FlushFileBuffers failed");
     }
 #else
     int fd = fileno(file_);
-    if (fd >= 0 && fsync(fd) != 0) {
-      return Status::IOError(filename_, "fsync failed");
+    if (fd < 0) {
+      return Status::IOError(filename_, "fileno failed");
     }
+#if defined(__APPLE__)
+    if (fcntl(fd, F_FULLFSYNC) < 0) {
+      return Status::IOError(filename_, "fcntl(F_FULLFSYNC) failed");
+    }
+#else
+    if (fdatasync(fd) < 0) {
+      return Status::IOError(filename_, "fdatasync failed");
+    }
+#endif
 #endif
     return Status::OK();
   }
 
   Status Close() override {
-    Status s = Flush();
+    Status s = FlushBuffer();
     if (file_) {
       if (std::fclose(file_) != 0 && s.ok()) {
         s = Status::IOError(filename_, "fclose failed");
@@ -137,8 +221,6 @@ class StdioWritableFile : public WritableFile {
   }
 
  private:
-  static constexpr size_t kWritableFileBufferSize = 65536;
-
   Status FlushBuffer() {
     Status s = WriteUnbuffered(buf_, pos_);
     pos_ = 0;
@@ -170,6 +252,27 @@ class PosixEnv : public Env {
     }
     result->reset(new StdioSequentialFile(fname, f));
     return Status::OK();
+  }
+
+  Status NewRandomAccessFile(const std::string& fname,
+                             std::unique_ptr<RandomAccessFile>* result) override {
+#if defined(_WIN32)
+    HANDLE handle = ::CreateFileA(
+        fname.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+      return Status::NotFound(fname, "cannot open file for random read");
+    }
+    result->reset(new WindowsRandomAccessFile(fname, handle));
+    return Status::OK();
+#else
+    int fd = ::open(fname.c_str(), O_RDONLY);
+    if (fd < 0) {
+      return Status::NotFound(fname, "cannot open file for random read");
+    }
+    result->reset(new PosixRandomAccessFile(fname, fd));
+    return Status::OK();
+#endif
   }
 
   Status NewWritableFile(const std::string& fname,

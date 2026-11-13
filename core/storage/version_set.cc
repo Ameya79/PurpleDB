@@ -1,0 +1,329 @@
+#include "core/storage/version_set.h"
+
+#include <algorithm>
+#include <cassert>
+#include <cstdio>
+#include "core/storage/filename.h"
+#include "core/storage/memtable.h"
+#include "core/storage/wal_reader.h"
+#include "core/util/coding.h"
+#include "core/util/logging.h"
+#include "purpledb/write_batch.h"
+
+namespace purpledb {
+
+Version::Version(VersionSet* vset) : vset_(vset), refs_(0) {}
+
+Version::~Version() {
+  assert(refs_ == 0);
+  // Remove from circular linked list
+  prev_->next_ = next_;
+  next_->prev_ = prev_;
+}
+
+bool Version::Get(const Slice& user_key, SequenceNumber snapshot_seq,
+                  std::string* val, Status* s) {
+  // Search L0 files in reverse order (newest to oldest)
+  for (int i = static_cast<int>(files_[0].size()) - 1; i >= 0; --i) {
+    const FileMetaData& f = files_[0][i];
+    if (f.smallest.size() < 8 || f.largest.size() < 8) {
+      continue;
+    }
+
+    Slice smallest_user(f.smallest.data(), f.smallest.size() - 8);
+    Slice largest_user(f.largest.data(), f.largest.size() - 8);
+
+    if (user_key.compare(smallest_user) < 0 || user_key.compare(largest_user) > 0) {
+      continue;
+    }
+
+    std::unique_ptr<Table> table;
+    Status open_status = vset_->GetTable(f.number, f.file_size, &table);
+    if (!open_status.ok()) {
+      *s = open_status;
+      return true;
+    }
+
+    static const InternalKeyBlockComparator kInternalKeyBlockComparator;
+    auto iter = table->NewIterator(&kInternalKeyBlockComparator);
+    // Build internal lookup key: user_key + max tag for snapshot_seq
+    std::string lookup_key;
+    lookup_key.append(user_key.data(), user_key.size());
+    PutFixed64(&lookup_key, (snapshot_seq << 8) | static_cast<uint8_t>(kTypeValue));
+
+    iter->Seek(Slice(lookup_key));
+    if (iter->Valid()) {
+      Slice found_key = iter->key();
+      if (found_key.size() >= 8) {
+        Slice found_user(found_key.data(), found_key.size() - 8);
+        if (found_user == user_key) {
+          uint64_t tag = DecodeFixed64(found_key.data() + found_key.size() - 8);
+          ValueType type = static_cast<ValueType>(tag & 0xff);
+          if (type == kTypeValue) {
+            *val = iter->value().ToString();
+            *s = Status::OK();
+            return true;
+          } else if (type == kTypeDeletion) {
+            *s = Status::NotFound(user_key, "deleted");
+            return true;
+          }
+        }
+      }
+    }
+    if (!iter->status().ok()) {
+      *s = iter->status();
+      return true;
+    }
+  }
+
+  return false;
+}
+
+class VersionSet::Builder {
+ public:
+  Builder(VersionSet* vset, Version* base) : vset_(vset), base_(base) {
+    base_->Ref();
+    for (int level = 0; level < kNumLevels; level++) {
+      added_files_[level] = base_->files_[level];
+    }
+  }
+
+  ~Builder() {
+    base_->Unref();
+  }
+
+  void Apply(const VersionEdit* edit) {
+    // Delete files
+    for (const auto& df : edit->deleted_files()) {
+      const int level = df.first;
+      const uint64_t number = df.second;
+      auto& flist = added_files_[level];
+      flist.erase(
+          std::remove_if(flist.begin(), flist.end(),
+                         [number](const FileMetaData& f) { return f.number == number; }),
+          flist.end());
+    }
+
+    // Add new files
+    for (const auto& nf : edit->new_files()) {
+      const int level = nf.first;
+      const FileMetaData& f = nf.second;
+      added_files_[level].push_back(f);
+    }
+  }
+
+  void SaveTo(Version* v) {
+    for (int level = 0; level < kNumLevels; level++) {
+      v->files_[level] = added_files_[level];
+    }
+  }
+
+ private:
+  VersionSet* vset_;
+  Version* base_;
+  std::vector<FileMetaData> added_files_[kNumLevels];
+};
+
+VersionSet::VersionSet(std::string dbname, Env* env)
+    : dbname_(std::move(dbname)),
+      env_(env),
+      dummy_versions_(this) {
+  AppendVersion(new Version(this));
+}
+
+VersionSet::~VersionSet() {
+  current_->Unref();
+  assert(dummy_versions_.next_ == &dummy_versions_);
+}
+
+void VersionSet::AppendVersion(Version* v) {
+  assert(v->refs_ == 0);
+  assert(v != current_);
+  if (current_ != nullptr) {
+    current_->Unref();
+  }
+  current_ = v;
+  v->Ref();
+
+  // Add to circular list before dummy_versions_
+  v->prev_ = dummy_versions_.prev_;
+  v->next_ = &dummy_versions_;
+  v->prev_->next_ = v;
+  v->next_->prev_ = v;
+}
+
+Status VersionSet::GetTable(uint64_t file_number, uint64_t file_size,
+                            std::unique_ptr<Table>* table) const {
+  std::string fname = TableFileName(dbname_, file_number);
+  if (file_size == 0) {
+    Status s = env_->GetFileSize(fname, &file_size);
+    if (!s.ok()) return s;
+  }
+
+  std::unique_ptr<RandomAccessFile> file;
+  Status s = env_->NewRandomAccessFile(fname, &file);
+  if (!s.ok()) return s;
+
+  return Table::Open(std::move(file), file_size, table);
+}
+
+Status VersionSet::LogAndApply(VersionEdit* edit) {
+  if (edit->has_next_file_number()) {
+    if (edit->next_file_number() > next_file_number_) {
+      next_file_number_ = edit->next_file_number();
+    }
+  }
+
+  if (edit->has_log_number()) {
+    assert(edit->log_number() >= log_number_);
+    if (edit->log_number() >= next_file_number_) {
+      next_file_number_ = edit->log_number() + 1;
+    }
+  } else {
+    edit->SetLogNumber(log_number_);
+  }
+
+  if (!edit->has_prev_log_number()) {
+    edit->SetPrevLogNumber(prev_log_number_);
+  }
+
+  edit->SetNextFileNumber(next_file_number_);
+  edit->SetLastSequence(last_sequence_);
+
+  Version* v = new Version(this);
+  Builder builder(this, current_);
+  builder.Apply(edit);
+  builder.SaveTo(v);
+
+  // Initialize new manifest if needed
+  std::string new_manifest_file;
+  Status s;
+  if (descriptor_log_ == nullptr) {
+    assert(descriptor_file_ == nullptr);
+    new_manifest_file = ManifestFileName(dbname_, manifest_file_number_);
+    edit->SetNextFileNumber(next_file_number_);
+
+    if (env_->FileExists(new_manifest_file)) {
+      uint64_t manifest_size = 0;
+      env_->GetFileSize(new_manifest_file, &manifest_size);
+      s = env_->NewAppendableFile(new_manifest_file, &descriptor_file_);
+      if (s.ok()) {
+        descriptor_log_ = std::make_unique<wal::WalWriter>(descriptor_file_.get(), manifest_size);
+      }
+    } else {
+      s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
+      if (s.ok()) {
+        descriptor_log_ = std::make_unique<wal::WalWriter>(descriptor_file_.get());
+      }
+    }
+  }
+
+  // Write record to manifest
+  if (s.ok()) {
+    std::string record;
+    edit->EncodeTo(&record);
+    s = descriptor_log_->AddRecord(Slice(record));
+    if (s.ok()) {
+      s = descriptor_file_->Sync();
+    }
+  }
+
+  // Atomically update CURRENT
+  if (s.ok() && !new_manifest_file.empty()) {
+    s = SetCurrentFile(env_, dbname_, manifest_file_number_);
+  }
+
+  // Install new version
+  if (s.ok()) {
+    AppendVersion(v);
+    log_number_ = edit->log_number();
+    prev_log_number_ = edit->prev_log_number();
+  } else {
+    delete v;
+    if (!new_manifest_file.empty()) {
+      descriptor_log_.reset();
+      descriptor_file_.reset();
+      env_->DeleteFile(new_manifest_file);
+    }
+  }
+
+  return s;
+}
+
+Status VersionSet::Recover() {
+  std::string current_path = CurrentFileName(dbname_);
+  if (!env_->FileExists(current_path)) {
+    // Database does not exist yet
+    return Status::OK();
+  }
+
+  // Read CURRENT
+  std::unique_ptr<SequentialFile> cfile;
+  Status s = env_->NewSequentialFile(current_path, &cfile);
+  if (!s.ok()) return s;
+
+  char buf[256];
+  Slice contents;
+  s = cfile->Read(sizeof(buf), &contents, buf);
+  cfile.reset();
+  if (!s.ok()) return s;
+
+  std::string manifest_line = contents.ToString();
+  while (!manifest_line.empty() &&
+         (manifest_line.back() == '\r' || manifest_line.back() == '\n' ||
+          manifest_line.back() == ' ')) {
+    manifest_line.pop_back();
+  }
+
+  if (manifest_line.empty()) {
+    return Status::Corruption("CURRENT file is empty");
+  }
+
+  std::string dscname = dbname_ + "/" + manifest_line;
+  std::unique_ptr<SequentialFile> mfile;
+  s = env_->NewSequentialFile(dscname, &mfile);
+  if (!s.ok()) return s;
+
+  wal::WalReader reader(mfile.get(), nullptr, true /*checksum*/, 0 /*initial_offset*/);
+  Slice record;
+  std::string scratch;
+  Builder builder(this, current_);
+
+  uint64_t next_file = 0;
+  uint64_t last_seq = 0;
+  uint64_t log_num = 0;
+  uint64_t prev_log_num = 0;
+
+  while (reader.ReadRecord(&record, &scratch)) {
+    VersionEdit edit;
+    s = edit.DecodeFrom(record);
+    if (!s.ok()) return s;
+
+    builder.Apply(&edit);
+
+    if (edit.has_log_number()) log_num = edit.log_number();
+    if (edit.has_prev_log_number()) prev_log_num = edit.prev_log_number();
+    if (edit.has_next_file_number()) next_file = edit.next_file_number();
+    if (edit.has_last_sequence()) last_seq = edit.last_sequence();
+  }
+
+  // Parse manifest number from filename: MANIFEST-%06llu
+  uint64_t manifest_num = 0;
+  if (std::sscanf(manifest_line.c_str(), "MANIFEST-%llu",
+                  reinterpret_cast<unsigned long long*>(&manifest_num)) == 1) {
+    manifest_file_number_ = manifest_num;
+  }
+
+  if (next_file > 0) next_file_number_ = next_file;
+  if (last_seq > 0) last_sequence_ = last_seq;
+  if (log_num > 0) log_number_ = log_num;
+  if (prev_log_num > 0) prev_log_number_ = prev_log_num;
+
+  Version* v = new Version(this);
+  builder.SaveTo(v);
+  AppendVersion(v);
+
+  return Status::OK();
+}
+
+}  // namespace purpledb

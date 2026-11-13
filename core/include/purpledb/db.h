@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <string>
+#include "core/storage/cache.h"
 #include "core/storage/env.h"
 #include "purpledb/slice.h"
 #include "purpledb/status.h"
@@ -21,6 +23,17 @@ struct Options {
 
   // Whether all writes are synchronously flushed and fsynced by default.
   bool sync{false};
+
+  // Amount of data to build up in memory before converting to an on-disk SSTable.
+  // Default: 4 MiB.
+  size_t write_buffer_size{4 * 1024 * 1024};
+
+  // Approximate size of user data packed per block in SSTables. Default: 4 KiB.
+  size_t block_size{4096};
+
+  // Control block cache (holds uncompressed blocks in memory).
+  // If nullptr, PurpleDB will automatically create a default 8 MiB cache.
+  std::shared_ptr<Cache> block_cache{nullptr};
 };
 
 struct WriteOptions {
@@ -42,9 +55,9 @@ struct ReadOptions {
  * CONCEPT FOR LEARNERS:
  * DB provides durable Put, Get, Delete, and atomic WriteBatch operations.
  * Mutations are appended sequentially to the Write-Ahead Log (WAL) before
- * being inserted into the in-memory MemTable. On startup or crash recovery,
- * the database replays the WAL to reconstruct the MemTable state, safely
- * ignoring truncated or uncommitted records at the tail.
+ * being inserted into the in-memory MemTable. When the MemTable fills up,
+ * it is converted to an immutable MemTable and flushed to a Level 0 SSTable file.
+ * Point reads resolve across MemTable -> Immutable MemTable -> SSTables.
  */
 class DB {
  public:

@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <string>
+#include "core/storage/block.h"
+#include "core/storage/skiplist.h"
+#include "core/util/arena.h"
+#include "purpledb/iterator.h"
 #include "purpledb/slice.h"
 #include "purpledb/status.h"
 #include "purpledb/write_batch.h"
@@ -19,15 +22,31 @@ namespace purpledb {
  * (kTypeValue or kTypeDeletion) in the low 8 bits:
  *   tag = (seq << 8) | type
  *
- * By sorting sequence numbers descending, lower_bound() immediately finds
+ * By sorting sequence numbers descending, lower_bound/Seek immediately finds
  * the newest version of the key visible to a given sequence number.
  */
 struct InternalKeyComparator {
+  int Compare(const Slice& a, const Slice& b) const;
   bool operator()(const std::string& a, const std::string& b) const;
+};
+
+class InternalKeyBlockComparator : public Block::Comparator {
+ public:
+  int Compare(const Slice& a, const Slice& b) const override {
+    return icmp_.Compare(a, b);
+  }
+ private:
+  InternalKeyComparator icmp_;
 };
 
 class MemTable {
  public:
+  struct KeyComparator {
+    const InternalKeyComparator comparator;
+    int operator()(const char* a, const char* b) const;
+  };
+  using Table = SkipList<const char*, KeyComparator>;
+
   MemTable();
   ~MemTable() = default;
 
@@ -43,14 +62,20 @@ class MemTable {
   // If not found in this memtable: returns false.
   bool Get(const Slice& key, SequenceNumber snapshot_seq, std::string* value, Status* s);
 
-  // Approximate memory usage of the memtable in bytes.
-  size_t ApproximateMemoryUsage() const { return memory_usage_; }
+  // Return an iterator over the contents of the memtable.
+  // The caller owns the returned iterator.
+  std::unique_ptr<Iterator> NewIterator();
 
-  size_t Count() const { return table_.size(); }
+  // Approximate memory usage of the memtable in bytes.
+  size_t ApproximateMemoryUsage() const { return arena_.MemoryUsage(); }
+
+  size_t Count() const { return count_; }
 
  private:
-  std::map<std::string, std::string, InternalKeyComparator> table_;
-  size_t memory_usage_{0};
+  KeyComparator comparator_;
+  Arena arena_;
+  Table table_;
+  size_t count_{0};
 };
 
 }  // namespace purpledb

@@ -27,6 +27,21 @@ class SequentialFile {
 };
 
 /**
+ * @brief RandomAccessFile represents a readable file that can be read at arbitrary byte offsets.
+ *
+ * Implementations must be thread-safe for concurrent Read() calls.
+ */
+class RandomAccessFile {
+ public:
+  virtual ~RandomAccessFile() = default;
+
+  // Read up to "n" bytes from the file starting at "offset".
+  // "scratch[0..n-1]" may be used by the implementation.
+  // Sets "*result" to the data that was read.
+  virtual Status Read(uint64_t offset, size_t n, Slice* result, char* scratch) const = 0;
+};
+
+/**
  * @brief WritableFile represents an append-only file for writes.
  */
 class WritableFile {
@@ -57,6 +72,8 @@ class Env {
 
   virtual Status NewSequentialFile(const std::string& fname,
                                    std::unique_ptr<SequentialFile>* result) = 0;
+  virtual Status NewRandomAccessFile(const std::string& fname,
+                                     std::unique_ptr<RandomAccessFile>* result) = 0;
   virtual Status NewWritableFile(const std::string& fname,
                                  std::unique_ptr<WritableFile>* result) = 0;
   virtual Status NewAppendableFile(const std::string& fname,
