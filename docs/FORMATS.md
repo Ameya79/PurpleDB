@@ -264,3 +264,81 @@ A `VersionEdit` serializes state deltas using tag-value pairs:
 | `0x06` | `kDeletedFile` | Varint32 + Varint64 | Level number + Deleted SSTable file number. |
 | `0x07` | `kNewFile` | Varint32 + Varint64 + Varint64 + Slice + Slice | Level number + File number + File size + Smallest InternalKey + Largest InternalKey. |
 
+---
+
+## 7. Bloom Filter & Metaindex Block Format (Format Version 1)
+
+PurpleDB SSTables incorporate Block-Framed Bloom Filters to eliminate disk I/O on negative point lookups (`NotFound`).
+
+### 7.1 Filter Block Wire Layout
+A Filter Block aggregates independent Bloom filter arrays for contiguous $2\text{ KiB}$ ($2^{11}\text{ bytes}$, $\text{base\_lg} = 11$) segments of data blocks:
+```
++-------------------------------------------------------------+
+| Filter 0 (Bytes for Data Offset 0 .. 2047)                  |
++-------------------------------------------------------------+
+| Filter 1 (Bytes for Data Offset 2048 .. 4095)               |
++-------------------------------------------------------------+
+| ...                                                         |
++-------------------------------------------------------------+
+| Filter N - 1                                                |
++-------------------------------------------------------------+
+| Filter 0 Byte Offset (4 Bytes, Fixed32)                     |
++-------------------------------------------------------------+
+| Filter 1 Byte Offset (4 Bytes, Fixed32)                     |
++-------------------------------------------------------------+
+| ...                                                         |
++-------------------------------------------------------------+
+| Filter N Byte Offset (End of Filters) (4 Bytes, Fixed32)    |
++-------------------------------------------------------------+
+| Offset Array Starting Offset (4 Bytes, Fixed32)             |
++-------------------------------------------------------------+
+| Base Lg (1 Byte uint8 = 11)                                 |
++-------------------------------------------------------------+
+```
+- **Filter Chunk Indexing**: Given a data block at file offset $O$, its filter index is:
+  $$\text{Index} = O \gg \text{base\_lg} = O \gg 11$$
+- **Offset Array Lookup**:
+  - Filter Start: `DecodeFixed32(offset_array + index * 4)`
+  - Filter Limit: `DecodeFixed32(offset_array + index * 4 + 4)`
+  - Filter Length: $\text{Limit} - \text{Start}$
+  - If $\text{Start} == \text{Limit}$, no keys were added in that $2\text{ KiB}$ window (lookup returns `false`).
+
+### 7.2 Built-in Bloom Filter Algorithm (Double Hashing)
+- **Policy Name**: `filter.purpledb.BuiltinBloomFilter2`
+- **Bits Per Key**: 10 bits/key default ($\approx 1\%\text{ false positive rate}$).
+- **Probes**: $k = \text{round}(m/n \times \ln 2) = \text{round}(10 \times 0.693) = 7\text{ hash functions}$.
+- **Double Hashing (Kirsch-Mitzenmacher)**:
+  Instead of evaluating $k$ distinct hash functions, two 32-bit hashes ($h_1$ and $h_2$) are derived from MurmurHash2:
+  $$h = \text{MurmurHash2}(\text{user\_key}, \text{seed}=\text{0xbc9f1d34})$$
+  $$\text{delta} = (h \gg 17) \mid (h \ll 15)$$
+  $$g_i = h + i \times \text{delta} \pmod m \quad \text{for } i \in [0, k-1]$$
+- **Trailing Byte**: The number of hash probes $k$ (1 byte) is appended to the end of the filter byte string:
+  $$\text{Filter Buffer} = [\text{Bit Array of } m/8\text{ Bytes}][k\text{ (1 Byte uint8)}]$$
+
+### 7.3 Metaindex Block Layout
+The Metaindex Block is a standard SSTable block referenced by the `metaindex_handle` in the 48-byte table footer.
+It contains one entry per table metadata block:
+- **Key**: Filter policy name slice (e.g. `filter.purpledb.BuiltinBloomFilter2`).
+- **Value**: Encoded `BlockHandle` pointing directly to the Filter Block in the SSTable file.
+
+---
+
+## 8. Leveled Storage Hierarchy & Lifecycle
+
+### 8.1 File Name Conventions
+Files in the database directory `<dbname>` follow strict naming rules:
+- `<dbname>/CURRENT`: ASCII text pointing to active `MANIFEST-<number>`.
+- `<dbname>/MANIFEST-<number>`: Binary log storing `VersionEdit` records.
+- `<dbname>/<number>.sst`: Static sorted string tables (data blocks, filter, metaindex, index, footer).
+- `<dbname>/<number>.log`: Write-ahead log chunks storing mutations.
+- `<dbname>/<number>.dbtmp`: Ephemeral write targets for atomic file replacement.
+
+### 8.2 Level Properties
+| Level | Key Range Overlap | File Size Target | Level Size Target | Compaction Trigger |
+| :--- | :--- | :--- | :--- | :--- |
+| **Level 0** | Overlapping (files ordered newest to oldest) | Flushed memtable size ($\approx 4\text{ MiB}$) | N/A | $\ge 4\text{ files}$ |
+| **Level 1** | Strictly Disjoint (sorted by user key) | $2\text{ MiB}$ chunks | $64\text{ MB}$ | Total bytes $> 64\text{ MB}$ |
+| **Level 2** | Strictly Disjoint (sorted by user key) | $2\text{ MiB}$ chunks | $640\text{ MB}$ | Total bytes $> 640\text{ MB}$ |
+| **Level 3..6**| Strictly Disjoint (sorted by user key) | $2\text{ MiB}$ chunks | $10\times$ previous level | Score $> 1.0$ |
+
+
