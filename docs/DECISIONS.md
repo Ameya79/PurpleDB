@@ -192,4 +192,31 @@ In accordance with Rule 4, benchmarks were conducted using `bench/db_bench.cc` w
 - **Negative Point Lookups (`readmissing`)**: 328,295 ops/sec with 100% filter rejection (0 false positives on missing keys), completely eliminating disk block accesses.
 - **Random Put (`fillrandom`)**: 47,066 ops/sec under active background compaction scheduling.
 
+---
+
+### ADR-021: WiscKey Vector-LSM Separation Architecture
+- **Date**: 2026-11-13
+- **Context**: Video embeddings are large (e.g. 512 float32 = 2,048 bytes per moment). Storing multi-kilobyte payloads inside SSTables causes severe write amplification ($30\times$) during leveled compaction, as vectors are repeatedly rewritten across levels $L0 \dots L6$.
+- **Decision**: Separate vector payloads from LSM keys (WiscKey pattern). Embeddings are appended strictly once to immutable `.vec` vector segment files. The LSM tree stores only 8-byte `VectorId` references and moment metadata.
+- **Consequences**: Compaction write amplification for vector data drops to $1\times$. LSM tree remains compact with small SSTables and high cache hit rates.
+
+---
+
+### ADR-022: Int8 Symmetric Scalar Quantization Scheme
+- **Date**: 2026-11-13
+- **Context**: In-memory vector search across millions of moments requires significant RAM (512 floats $\times$ 4 bytes $\times 10^7 = 20.48\text{ GB}$). Quantization cuts RAM footprint by $4\times$.
+- **Decision**: Implement symmetric scalar quantization with per-vector scaling:
+  $q_i = \text{clamp}(\text{round}(v_i / \text{scale}), -127, 127)$ where $\text{scale} = \max_i |v_i| / 127.0f$.
+  The integer dot product is accumulated using fast 8-bit SIMD instructions, then multiplied by $(\text{scale}_u \times \text{scale}_v)$.
+- **Consequences**: Memory footprint drops from 2,048 bytes to 516 bytes per 512-d vector. Vector similarity matches float32 ranking with negligible quantization error ($< 0.05$ difference on unit sphere).
+
+---
+
+### ADR-023: Chunk-Framed Checksumming for Append-Only Vector Segments
+- **Date**: 2026-11-13
+- **Context**: To guarantee crash safety without rewriting vector files, partial writes and torn tails must be detectable during recovery.
+- **Decision**: Vector segments group writes into chunks of $K$ vectors (e.g. 64 vectors) protected by a 4-byte Castagnoli CRC-32C checksum. A crash during a write leaves an invalid checksum or partial chunk at the tail; on recovery, readers verify chunks sequentially and discard unchecksummed torn tails up to the last durable chunk.
+- **Consequences**: Deterministic crash safety matching the WAL invariants, with low checksumming overhead.
+
+
 
