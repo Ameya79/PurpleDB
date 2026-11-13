@@ -154,6 +154,7 @@ TEST(HNSWTest, SnapshotSaveLoadAndTailReplay) {
   Status s = recovered.LoadSnapshot(fixture.env_, snapshot_file);
   ASSERT_STATUS_OK(s);
   ASSERT_EQ(recovered.NodeCount(), 50u);
+  recovered.SetVectors(data);
 
   // Supply flat vectors to recovered instance
   std::vector<float> tail_data(20 * 16);

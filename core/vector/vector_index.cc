@@ -175,6 +175,7 @@ Status VectorIndex::Recover() {
     if (env->FileExists(snapshot_path)) {
       Status snap_s = hnsw_->LoadSnapshot(env, snapshot_path);
       if (snap_s.ok()) {
+        hnsw_->SetVectors(flat_vectors_);
         uint64_t snap_nodes = hnsw_->NodeCount();
         if (snap_nodes < recovered_vec_count) {
           // Replay tail inserts from recovered_vec_count
