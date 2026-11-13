@@ -48,6 +48,7 @@ find_package(Threads REQUIRED)
 # Core library sources
 set(PURPLEDB_CORE_SOURCES
   core/storage/crc32c.cc
+  core/storage/env.cc
   core/util/coding.cc
   core/util/logging.cc
   core/util/slice.cc
@@ -73,6 +74,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/crc32c_test.cc
   tests/coding_test.cc
   tests/logging_test.cc
+  tests/env_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
