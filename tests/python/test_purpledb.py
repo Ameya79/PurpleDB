@@ -7,9 +7,13 @@ import time
 import unittest
 from pathlib import Path
 
-# Add bindings directory to sys.path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "bindings" / "python"))
-import purpledb
+# Prefer installed package; fallback to in-tree bindings if running uninstalled
+try:
+    import purpledb
+    from purpledb import _purpledb  # verify binary extension is available
+except (ModuleNotFoundError, ImportError):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "bindings" / "python"))
+    import purpledb
 
 
 class TestPurpleDB(unittest.TestCase):

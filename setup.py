@@ -49,6 +49,13 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", ext.sourcedir] + cmake_args, cwd=build_dir)
         subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=build_dir)
 
+        # Also copy built binaries to source_pkg for local/in-tree imports
+        for ext_file in dest_file.parent.glob("_purpledb*"):
+            try:
+                shutil.copy2(ext_file, source_pkg / ext_file.name)
+            except Exception:
+                pass
+
 
 setup(
     name="purpledb",
