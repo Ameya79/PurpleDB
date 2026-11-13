@@ -1,0 +1,12 @@
+=================================================
+       PurpleDB Vector Engine Benchmark (M5)     
+=================================================
+Vectors: 10000 | Dimension: 512
+Raw Vector Payload: 19.531250 MB
+Metric: Cosine Similarity | Format: Append-Only .vec (WiscKey Separation)
+-------------------------------------------------
+vec_ingest              :      3.3 sec |     2998.4 vectors/sec |      5.9 MB/sec
+vec_search_top10 (SIMD) :    10.00 sec |      20.00 QPS         |    50.00 ms/query
+vec_segment_scan (CRC)  :      0.4 sec |    26006.0 vectors/sec |     50.8 MB/sec
+-------------------------------------------------
+Benchmark completed successfully.

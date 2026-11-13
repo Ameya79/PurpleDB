@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <iostream>
 #include <sstream>
@@ -182,6 +183,18 @@ struct TestRegistrar {
       std::ostringstream ss; \
       ss << __FILE__ << ":" << __LINE__ << ": Expected (" #a " >= " #b "), but (" \
          << (a) << " < " << (b) << ")"; \
+      ::purpledb::test::TestRunner::Instance().Fail(ss.str()); \
+      return; \
+    } \
+  } while (0)
+
+#define ASSERT_NEAR(a, b, eps) \
+  do { \
+    double _diff = std::fabs(static_cast<double>(a) - static_cast<double>(b)); \
+    if (_diff > static_cast<double>(eps)) { \
+      std::ostringstream ss; \
+      ss << __FILE__ << ":" << __LINE__ << ": Expected (" #a " approx " #b " within " #eps "), but diff was " \
+         << _diff << " (" << (a) << " vs " << (b) << ")"; \
       ::purpledb::test::TestRunner::Instance().Fail(ss.str()); \
       return; \
     } \

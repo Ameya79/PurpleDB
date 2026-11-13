@@ -69,6 +69,10 @@ set(PURPLEDB_CORE_SOURCES
   core/storage/wal_reader.cc
   core/storage/wal_writer.cc
   core/storage/write_batch.cc
+  core/vector/distance.cc
+  core/vector/delete_bitmap.cc
+  core/vector/vector_segment.cc
+  core/vector/vector_index.cc
   core/util/arena.cc
   core/util/coding.cc
   core/util/hash.cc
@@ -114,6 +118,11 @@ set(PURPLEDB_TEST_SOURCES
   tests/m2_acceptance_test.cc
   tests/m3_acceptance_test.cc
   tests/m4_acceptance_test.cc
+  tests/distance_test.cc
+  tests/delete_bitmap_test.cc
+  tests/vector_segment_test.cc
+  tests/vector_index_test.cc
+  tests/m5_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
@@ -129,6 +138,13 @@ add_test(NAME purpledb_tests COMMAND purpledb_tests)
 add_executable(db_bench bench/db_bench.cc)
 target_link_libraries(db_bench PRIVATE purpledb_core Threads::Threads)
 target_include_directories(db_bench PRIVATE
+  core/include
+  core
+)
+
+add_executable(vec_bench bench/vec_bench.cc)
+target_link_libraries(vec_bench PRIVATE purpledb_core Threads::Threads)
+target_include_directories(vec_bench PRIVATE
   core/include
   core
 )

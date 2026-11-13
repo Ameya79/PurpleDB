@@ -27,6 +27,8 @@ fastembed_cache/
 build/
 build-*/
 cmake-build-*/
+bench_*_data/
+*_db/
 *.exe
 *.a
 *.lib

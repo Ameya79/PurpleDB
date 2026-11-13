@@ -341,4 +341,89 @@ Files in the database directory `<dbname>` follow strict naming rules:
 | **Level 2** | Strictly Disjoint (sorted by user key) | $2\text{ MiB}$ chunks | $640\text{ MB}$ | Total bytes $> 640\text{ MB}$ |
 | **Level 3..6**| Strictly Disjoint (sorted by user key) | $2\text{ MiB}$ chunks | $10\times$ previous level | Score $> 1.0$ |
 
+---
+
+## 9. Vector Segment & Index Storage Format (Format Version 1)
+
+PurpleDB employs the WiscKey key-value separation architecture: high-dimensional vector embeddings are stored in dedicated append-only `.vec` segment files, while index pointers and moment metadata reside in the LSM tree.
+
+### 9.1 Vector Segment File Format (`.vec`)
+Vector segments store fixed-dimension vectors organized into verified chunks.
+
+#### 9.1.1 File Header (Fixed 64 Bytes)
+Every `.vec` segment file begins with a 64-byte binary header:
+```
++--------------------+--------------------+--------------------+--------------------+
+| Magic Number (8 B) | Version (4 B u32)  | Dimension (4 B u32)| DataType (1 B u8)  |
+| 0xdb564543544f5231 | 1                  | e.g. 512           | 0=Float32, 1=Int8  |
++--------------------+--------------------+--------------------+--------------------+
+| Metric (1 B u8)    | Reserved (6 B 0x00)| Chunk Size (4 B u32| Model ID Len (2 B) |
+| 0=Cosine, 1=L2     | Zero padding       | e.g. 64 vectors    | uint16             |
++--------------------+--------------------+--------------------+--------------------+
+| Model Identifier String (30 Bytes ASCII, null-padded)        | CRC-32C (4 B u32)  |
+| e.g. "openai/clip-vit-base-patch32"                          | Masked Castagnoli  |
++--------------------------------------------------------------+--------------------+
+```
+- **Magic Number**: `0xdb564543544f5231ULL` (ASCII byte sequence: `0xdb`, `'V'`, `'E'`, `'C'`, `'T'`, `'O'`, `'R'`, `'1'`).
+- **Format Version**: `1` (Fixed32).
+- **DataType**:
+  - `0x00`: `kFloat32` (IEEE 754 single-precision float, 4 bytes per dimension).
+  - `0x01`: `kInt8` (Scalar quantized signed integer, 1 byte per dimension + 4-byte float scale factor per vector).
+- **Metric**:
+  - `0x00`: `kCosine` (Normalized dot product).
+  - `0x01`: `kL2` (Euclidean distance squared).
+- **Header CRC-32C**: Castagnoli CRC-32C computed over the preceding 60 bytes of the header and masked.
+
+#### 9.1.2 Chunked Body Layout
+Vectors are written in contiguous chunks of $K$ vectors (`chunk_size`, default 64 vectors):
+```
++---------------------------------------------------------------+
+| Chunk 0: [K Vectors Payload] [CRC-32C Checksum (4 Bytes)]     |
++---------------------------------------------------------------+
+| Chunk 1: [K Vectors Payload] [CRC-32C Checksum (4 Bytes)]     |
++---------------------------------------------------------------+
+| ...                                                           |
++---------------------------------------------------------------+
+| Chunk M - 1: [Count u32 (4 B)] [Partial Vectors] [CRC-32C]    |
++---------------------------------------------------------------+
+```
+- **Full Chunk**: Contains exactly $K$ vectors followed by a 4-byte masked CRC-32C checksum over the chunk's payload bytes.
+- **Partial Chunk (Tail Flush)**: When sealing or syncing a segment before filling a full chunk, the chunk starts with a 4-byte `Count` ($C < K$), followed by $C$ vectors and a 4-byte checksum over the count and vectors.
+- **Vector Record Layout**:
+  - **Float32**: Contiguous array of $\text{dim} \times 4$ bytes (little-endian float32).
+  - **Int8 (Scalar Quantized)**:
+    - 4 bytes `scale` (little-endian float32): $\text{scale} = \max_i |v_i| / 127.0f$.
+    - $\text{dim} \times 1$ bytes `int8_t`: $q_i = \text{round}(v_i / \text{scale})$.
+    - Reconstruction: $v_i \approx q_i \times \text{scale}$.
+    - Dot product between $u$ and $v$:
+      $$\langle u, v \rangle \approx (\text{scale}_u \times \text{scale}_v) \sum_{i=0}^{\text{dim}-1} q_{u,i} \cdot q_{v,i}$$
+      The integer dot product $\sum q_{u,i} q_{v,i}$ executes via high-throughput SIMD instructions.
+
+### 9.2 Delete Bitmap Binary Format
+Tombstones for deleted vector IDs are maintained in a dense bitset.
+
+```
++-------------------------+-------------------------+-------------------------+
+| Magic (4 Bytes, Fixed32)| Vector Count (8 B u64)  | Deleted Count (8 B u64) |
+| 0xdb424d50 ("\xdbBMP")  | Total vectors tracked   | Total tombstones set    |
++-------------------------+-------------------------+-------------------------+
+| Bitset Words (ceil(Vector Count / 64) * 8 Bytes, Little-Endian Fixed64)     |
+| Bit = 1 indicates deleted / tombstoned vector                               |
++---------------------------------------------------+-------------------------+
+| Masked CRC-32C Castagnoli Checksum (4 Bytes u32)   |
++---------------------------------------------------+
+```
+- Bit position $i$ corresponds to `VectorId = i`.
+- If bit $i == 1$, vector $i$ is tombstoned and filtered out of search results in $O(1)$ time without visiting disk or touching the vector segment.
+
+### 9.3 WiscKey Keyspace Tagging & Metadata Schema
+To separate large vector payloads from LSM compaction, the LSM store records lightweight references:
+
+| Keyspace Prefix | User Key Pattern | Value Payload Layout |
+| :--- | :--- | :--- |
+| `'m'` (`0x6d`) | `video_id:moment_id` | `[start_pts u64][end_pts u64][vector_id u64][thumb_offset u64]` |
+| `'v'` (`0x76`) | `vector_id (Fixed64)`| `video_id:moment_id (String)` |
+| `'s'` (`0x73`) | `system:<name>` | System metadata (e.g. `next_vector_id`, `model_lock`) |
+
+
 

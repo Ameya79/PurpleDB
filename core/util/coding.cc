@@ -2,6 +2,12 @@
 
 namespace purpledb {
 
+void EncodeFixed16(char* buf, uint16_t value) {
+  auto* const buffer = reinterpret_cast<uint8_t*>(buf);
+  buffer[0] = static_cast<uint8_t>(value);
+  buffer[1] = static_cast<uint8_t>(value >> 8);
+}
+
 void EncodeFixed32(char* buf, uint32_t value) {
   auto* const buffer = reinterpret_cast<uint8_t*>(buf);
   buffer[0] = static_cast<uint8_t>(value);
@@ -20,6 +26,12 @@ void EncodeFixed64(char* buf, uint64_t value) {
   buffer[5] = static_cast<uint8_t>(value >> 40);
   buffer[6] = static_cast<uint8_t>(value >> 48);
   buffer[7] = static_cast<uint8_t>(value >> 56);
+}
+
+void PutFixed16(std::string* dst, uint16_t value) {
+  char buf[sizeof(value)];
+  EncodeFixed16(buf, value);
+  dst->append(buf, sizeof(buf));
 }
 
 void PutFixed32(std::string* dst, uint32_t value) {
