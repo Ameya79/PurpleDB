@@ -74,6 +74,8 @@ set(PURPLEDB_CORE_SOURCES
   core/vector/vector_segment.cc
   core/vector/vector_index.cc
   core/vector/hnsw.cc
+  core/embed/api_adapter.cc
+  core/embed/local_embedder.cc
   core/util/arena.cc
   core/util/coding.cc
   core/util/hash.cc
@@ -126,6 +128,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/m5_acceptance_test.cc
   tests/hnsw_test.cc
   tests/m6_acceptance_test.cc
+  tests/embedder_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
