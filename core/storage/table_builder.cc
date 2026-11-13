@@ -26,7 +26,11 @@ void TableBuilder::Add(const Slice& key, const Slice& value) {
   if (!status_.ok()) return;
 
   if (num_entries_ > 0) {
-    assert(key.compare(Slice(last_key_)) > 0);
+    if (options_.comparator != nullptr) {
+      assert(options_.comparator->Compare(key, Slice(last_key_)) > 0);
+    } else {
+      assert(key.compare(Slice(last_key_)) > 0);
+    }
   }
 
   if (pending_index_entry_) {

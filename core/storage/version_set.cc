@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdio>
 #include "core/storage/filename.h"
+#include "core/storage/memtable.h"
 #include "core/storage/wal_reader.h"
 #include "core/util/coding.h"
 #include "core/util/logging.h"
@@ -43,7 +44,8 @@ bool Version::Get(const Slice& user_key, SequenceNumber snapshot_seq,
       return true;
     }
 
-    auto iter = table->NewIterator();
+    static const InternalKeyBlockComparator kInternalKeyBlockComparator;
+    auto iter = table->NewIterator(&kInternalKeyBlockComparator);
     // Build internal lookup key: user_key + max tag for snapshot_seq
     std::string lookup_key;
     lookup_key.append(user_key.data(), user_key.size());

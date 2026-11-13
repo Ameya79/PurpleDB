@@ -1,6 +1,8 @@
 #include "core/storage/db_impl.h"
 
 #include <algorithm>
+#include "core/storage/filename.h"
+#include "core/storage/table_builder.h"
 #include "core/storage/wal_reader.h"
 #include "core/util/logging.h"
 
@@ -44,18 +46,16 @@ DBImpl::DBImpl(const Options& options, std::string dbname)
     : options_(options),
       dbname_(std::move(dbname)),
       env_(options.env ? options.env : Env::Default()),
+      versions_(std::make_unique<VersionSet>(dbname_, env_)),
       mem_(std::make_unique<MemTable>()),
-      last_sequence_(0) {}
+      last_sequence_(0),
+      block_cache_(options.block_cache ? options.block_cache : NewLRUCache(8 * 1024 * 1024)) {}
 
 DBImpl::~DBImpl() {
   std::lock_guard<std::mutex> lock(mutex_);
   if (log_file_) {
     log_file_->Close();
   }
-}
-
-std::string DBImpl::CurrentLogFilename() const {
-  return dbname_ + "/000001.log";
 }
 
 Status DBImpl::Recover() {
@@ -67,32 +67,52 @@ Status DBImpl::Recover() {
       return Status::InvalidArgument(dbname_, "database directory does not exist");
     }
     Status s = env_->CreateDirIfMissing(dbname_);
-    if (!s.ok()) {
-      return s;
-    }
+    if (!s.ok()) return s;
   } else if (options_.error_if_exists) {
     return Status::InvalidArgument(dbname_, "database directory already exists");
   }
 
-  const std::string log_name = CurrentLogFilename();
-  uint64_t log_size = 0;
+  const bool has_current = env_->FileExists(CurrentFileName(dbname_));
+  if (!has_current) {
+    // Fresh database initialization
+    log_number_ = versions_->NewFileNumber();
+    VersionEdit new_db;
+    new_db.SetComparatorName(Slice("leveldb.BytewiseComparator"));
+    new_db.SetLogNumber(log_number_);
+    new_db.SetNextFileNumber(log_number_ + 1);
+    new_db.SetLastSequence(0);
 
+    Status s = versions_->LogAndApply(&new_db);
+    if (!s.ok()) return s;
+
+    s = env_->NewWritableFile(LogFileName(dbname_, log_number_), &log_file_);
+    if (!s.ok()) return s;
+
+    log_ = std::make_unique<wal::WalWriter>(log_file_.get());
+    return Status::OK();
+  }
+
+  // Recover existing VersionSet from MANIFEST
+  Status s = versions_->Recover();
+  if (!s.ok()) return s;
+
+  last_sequence_ = versions_->LastSequence();
+  log_number_ = versions_->LogNumber();
+
+  // Replay existing WAL log
+  const std::string log_name = LogFileName(dbname_, log_number_);
   if (env_->FileExists(log_name)) {
-    // Replay existing WAL to recover memtable
     std::unique_ptr<SequentialFile> sf;
-    Status s = env_->NewSequentialFile(log_name, &sf);
-    if (!s.ok()) {
-      return s;
-    }
+    s = env_->NewSequentialFile(log_name, &sf);
+    if (!s.ok()) return s;
 
-    wal::WalReader reader(sf.get(), nullptr, options_.sync);
+    wal::WalReader reader(sf.get(), nullptr, options_.sync, 0);
     Slice record;
     std::string scratch;
 
     while (reader.ReadRecord(&record, &scratch)) {
-      if (record.size() < 12) {
-        continue;
-      }
+      if (record.size() < 12) continue;
+
       WriteBatch batch;
       batch.SetData(record);
       SequenceNumber seq = batch.Sequence();
@@ -101,25 +121,133 @@ Status DBImpl::Recover() {
 
       last_sequence_ = std::max(last_sequence_, seq + batch.Count() - 1);
     }
-
-    sf.reset();  // Close file handle before opening appendable file
-
-    env_->GetFileSize(log_name, &log_size);
-    s = env_->NewAppendableFile(log_name, &log_file_);
-    if (!s.ok()) {
-      return s;
-    }
-    log_ = std::make_unique<wal::WalWriter>(log_file_.get(), log_size);
-  } else {
-    // Fresh WAL file
-    Status s = env_->NewWritableFile(log_name, &log_file_);
-    if (!s.ok()) {
-      return s;
-    }
-    log_ = std::make_unique<wal::WalWriter>(log_file_.get());
+    sf.reset();
   }
 
+  // Roll to a fresh WAL log for subsequent mutations
+  uint64_t new_log = versions_->NewFileNumber();
+  VersionEdit edit;
+  edit.SetLogNumber(new_log);
+  s = versions_->LogAndApply(&edit);
+  if (!s.ok()) return s;
+
+  s = env_->NewWritableFile(LogFileName(dbname_, new_log), &log_file_);
+  if (!s.ok()) return s;
+
+  log_ = std::make_unique<wal::WalWriter>(log_file_.get());
+  log_number_ = new_log;
+  versions_->SetLastSequence(last_sequence_);
+
   return Status::OK();
+}
+
+Status DBImpl::FlushMemTableToOutputFile(MemTable* mem, uint64_t new_log_number) {
+  if (mem == nullptr || mem->Count() == 0) {
+    return Status::OK();
+  }
+
+  uint64_t file_number = versions_->NewFileNumber();
+  std::string sst_name = TableFileName(dbname_, file_number);
+  std::unique_ptr<WritableFile> file;
+  Status s = env_->NewWritableFile(sst_name, &file);
+  if (!s.ok()) return s;
+
+  static const InternalKeyBlockComparator kInternalKeyBlockComparator;
+  TableBuilderOptions tb_opts;
+  tb_opts.block_size = options_.block_size;
+  tb_opts.comparator = &kInternalKeyBlockComparator;
+  TableBuilder builder(tb_opts, file.get());
+
+  auto iter = mem->NewIterator();
+  std::string smallest_key;
+  std::string largest_key;
+
+  for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
+    Slice k = iter->key();
+    Slice v = iter->value();
+    if (smallest_key.empty()) {
+      smallest_key = k.ToString();
+    }
+    largest_key = k.ToString();
+    builder.Add(k, v);
+  }
+
+  s = builder.Finish();
+  if (s.ok()) {
+    s = file->Close();
+  }
+  file.reset();
+
+  if (s.ok() && builder.NumEntries() > 0) {
+    VersionEdit edit;
+    edit.SetLogNumber(new_log_number);
+    edit.AddFile(0, file_number, builder.FileSize(), Slice(smallest_key),
+                 Slice(largest_key));
+    s = versions_->LogAndApply(&edit);
+  }
+
+  return s;
+}
+
+Status DBImpl::MaybeFlushMemTable() {
+  if (mem_->ApproximateMemoryUsage() < options_.write_buffer_size) {
+    return Status::OK();
+  }
+
+  // Switch active memtable to immutable
+  imm_ = std::move(mem_);
+  mem_ = std::make_unique<MemTable>();
+
+  // Roll WAL
+  uint64_t new_log_number = versions_->NewFileNumber();
+  if (log_file_) {
+    log_file_->Close();
+  }
+  log_.reset();
+  log_file_.reset();
+
+  Status s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &log_file_);
+  if (!s.ok()) return s;
+  log_ = std::make_unique<wal::WalWriter>(log_file_.get());
+
+  // Dump imm_ to SSTable
+  s = FlushMemTableToOutputFile(imm_.get(), new_log_number);
+  if (s.ok()) {
+    env_->DeleteFile(LogFileName(dbname_, log_number_));
+    log_number_ = new_log_number;
+    imm_.reset();
+  }
+
+  return s;
+}
+
+Status DBImpl::FlushMemTable() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (mem_->Count() == 0) {
+    return Status::OK();
+  }
+
+  imm_ = std::move(mem_);
+  mem_ = std::make_unique<MemTable>();
+
+  uint64_t new_log_number = versions_->NewFileNumber();
+  if (log_file_) {
+    log_file_->Close();
+  }
+  log_.reset();
+  log_file_.reset();
+
+  Status s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &log_file_);
+  if (!s.ok()) return s;
+  log_ = std::make_unique<wal::WalWriter>(log_file_.get());
+
+  s = FlushMemTableToOutputFile(imm_.get(), new_log_number);
+  if (s.ok()) {
+    env_->DeleteFile(LogFileName(dbname_, log_number_));
+    log_number_ = new_log_number;
+    imm_.reset();
+  }
+  return s;
 }
 
 Status DBImpl::Put(const WriteOptions& options, const Slice& key, const Slice& value) {
@@ -141,40 +269,49 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
   std::lock_guard<std::mutex> lock(mutex_);
 
+  // Check if MemTable needs flush
+  Status s = MaybeFlushMemTable();
+  if (!s.ok()) return s;
+
   const SequenceNumber seq = last_sequence_ + 1;
   updates->SetSequence(seq);
   last_sequence_ += updates->Count();
 
-  // 1. Write mutations to the Write-Ahead Log
-  Status s = log_->AddRecord(Slice(updates->Data()));
-  if (!s.ok()) {
-    return s;
-  }
+  // 1. Write mutations to WAL
+  s = log_->AddRecord(Slice(updates->Data()));
+  if (!s.ok()) return s;
 
   if (options.sync || options_.sync) {
     s = log_file_->Sync();
-    if (!s.ok()) {
-      return s;
-    }
+    if (!s.ok()) return s;
   }
 
-  // 2. Apply mutations to the MemTable
+  // 2. Apply mutations to active MemTable
   MemTableInserter inserter(seq, mem_.get());
   s = updates->Iterate(&inserter);
+  if (s.ok()) {
+    versions_->SetLastSequence(last_sequence_);
+  }
   return s;
 }
 
 Status DBImpl::Get(const ReadOptions& options, const Slice& key, std::string* value) {
-  SequenceNumber snapshot_seq;
-  MemTable* mem;
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    snapshot_seq = (options.snapshot == 0) ? last_sequence_ : options.snapshot;
-    mem = mem_.get();
-  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const SequenceNumber snapshot_seq = (options.snapshot == 0) ? last_sequence_ : options.snapshot;
 
   Status s;
-  if (mem->Get(key, snapshot_seq, value, &s)) {
+  // 1. Check active MemTable
+  if (mem_->Get(key, snapshot_seq, value, &s)) {
+    return s;
+  }
+
+  // 2. Check immutable MemTable (if pending flush)
+  if (imm_ && imm_->Get(key, snapshot_seq, value, &s)) {
+    return s;
+  }
+
+  // 3. Check Level 0 SSTables
+  if (versions_->current()->Get(key, snapshot_seq, value, &s)) {
     return s;
   }
 

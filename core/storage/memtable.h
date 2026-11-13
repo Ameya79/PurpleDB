@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include "core/storage/block.h"
 #include "core/storage/skiplist.h"
 #include "core/util/arena.h"
 #include "purpledb/iterator.h"
@@ -27,6 +28,15 @@ namespace purpledb {
 struct InternalKeyComparator {
   int Compare(const Slice& a, const Slice& b) const;
   bool operator()(const std::string& a, const std::string& b) const;
+};
+
+class InternalKeyBlockComparator : public Block::Comparator {
+ public:
+  int Compare(const Slice& a, const Slice& b) const override {
+    return icmp_.Compare(a, b);
+  }
+ private:
+  InternalKeyComparator icmp_;
 };
 
 class MemTable {

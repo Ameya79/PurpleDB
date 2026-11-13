@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include "core/storage/block.h"
 #include "core/storage/block_builder.h"
 #include "core/storage/env.h"
 #include "core/storage/format.h"
@@ -14,6 +15,7 @@ namespace purpledb {
 struct TableBuilderOptions {
   size_t block_size{4096};
   int block_restart_interval{16};
+  const Block::Comparator* comparator{nullptr};
 };
 
 /**
