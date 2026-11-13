@@ -1,0 +1,14 @@
+=================================================
+       PurpleDB Vector Engine Benchmark (M5/M6)  
+=================================================
+Vectors: 5000 | Dimension: 512
+Raw Vector Payload: 9.765625 MB
+Metric: Cosine Similarity | Index: HNSW (M=16, efC=200, efS=64) + WiscKey
+-------------------------------------------------
+vec_ingest + hnsw_build :     56.0 sec |       89.3 vectors/sec |      0.2 MB/sec
+vec_search_exact (SIMD) :     2.24 sec |      22.36 QPS         |    44.72 ms/query
+vec_search_hnsw (ef=64) :     0.68 sec |     146.60 QPS         |     6.82 ms/query
+vec_segment_scan (CRC)  :      0.4 sec |    13762.9 vectors/sec |     26.9 MB/sec
+hnsw_snapshot_cold_open :    1.017 sec | Instant cold restart without rebuilding
+-------------------------------------------------
+Benchmark completed successfully.

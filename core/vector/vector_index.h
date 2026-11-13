@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -9,6 +10,7 @@
 #include "core/storage/env.h"
 #include "core/vector/delete_bitmap.h"
 #include "core/vector/distance.h"
+#include "core/vector/hnsw.h"
 #include "core/vector/vector_segment.h"
 #include "purpledb/db.h"
 #include "purpledb/status.h"
@@ -32,6 +34,13 @@ struct VectorOptions {
   MetricType metric{MetricType::kCosine};
   uint32_t chunk_size{64};
   std::string model_id{"openai/clip-vit-base-patch32"};
+
+  // HNSW Approximate Nearest Neighbor parameters (Milestone M6)
+  bool enable_hnsw{true};
+  uint16_t hnsw_M{16};
+  uint16_t hnsw_max_M0{32};
+  uint32_t hnsw_efConstruction{200};
+  uint32_t hnsw_efSearch{64};
 };
 
 /**
@@ -41,7 +50,8 @@ struct VectorOptions {
  * - High-dimensional vector payloads reside in append-only .vec files.
  * - Moment metadata and vector references reside in the LSM tree.
  * - Deletes are tombstoned in an O(1) in-memory DeleteBitmap.
- * - Brute-force Top-K search executes with SIMD AVX2/NEON optimizations.
+ * - Nearest neighbor search uses HNSW graph indexing with fallback to SIMD flat scan.
+ * - Post-filtering with dynamic over-fetch satisfies metadata constraints.
  */
 class VectorIndex {
  public:
@@ -59,9 +69,22 @@ class VectorIndex {
   // Mark user key as deleted
   Status Delete(const std::string& key);
 
-  // Exact brute-force SIMD search for top K closest vectors
+  // Search for top K closest vectors using HNSW index (or exact SIMD fallback)
   Status Search(const float* query_vector, size_t dim, size_t k,
                 std::vector<SearchResult>* results);
+
+  // Exact brute-force SIMD search for top K closest vectors (ground truth baseline)
+  Status SearchExact(const float* query_vector, size_t dim, size_t k,
+                     std::vector<SearchResult>* results);
+
+  // Filtered vector search with dynamic over-fetch
+  Status SearchFiltered(const float* query_vector, size_t dim, size_t k,
+                        const std::function<bool(const std::string& key)>& filter_fn,
+                        std::vector<SearchResult>* results,
+                        size_t overfetch = 2);
+
+  // Rebuild the HNSW graph omitting deleted nodes (vacuum)
+  Status RebuildIndex();
 
   // Check if key exists and is not deleted
   bool Contains(const std::string& key);
@@ -75,13 +98,14 @@ class VectorIndex {
   // Fraction of deleted vectors
   double DeletedFraction() const { return delete_bitmap_.DeletedFraction(); }
 
-  // Flush in-flight writes
+  // Flush in-flight writes and persist HNSW snapshot
   Status Flush();
 
   // Fsync storage
   Status Sync();
 
   const VectorOptions& options() const { return options_; }
+  HNSW* hnsw() { return hnsw_.get(); }
 
  private:
   VectorIndex(const VectorOptions& options, const std::string& db_path,
@@ -89,11 +113,13 @@ class VectorIndex {
 
   Status Recover();
   Status PersistSystemMetadata();
+  Status SaveHNSWSnapshot();
 
   VectorOptions options_;
   std::string db_path_;
   std::unique_ptr<DB> db_;
   std::unique_ptr<VectorSegmentWriter> segment_writer_;
+  std::unique_ptr<HNSW> hnsw_;
 
   DeleteBitmap delete_bitmap_;
   uint64_t next_vector_id_{0};

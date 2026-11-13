@@ -19,6 +19,9 @@ VectorIndex::~VectorIndex() {
   if (segment_writer_) {
     segment_writer_->Close();
   }
+  if (hnsw_) {
+    SaveHNSWSnapshot();
+  }
 }
 
 Status VectorIndex::Open(const VectorOptions& options, const std::string& db_path,
@@ -156,6 +159,39 @@ Status VectorIndex::Recover() {
     }
   }
 
+  // 6. Initialize or restore HNSW graph index
+  if (options_.enable_hnsw) {
+    HNSWOptions hnsw_opts;
+    hnsw_opts.dim = options_.dim;
+    hnsw_opts.metric = options_.metric;
+    hnsw_opts.M = options_.hnsw_M;
+    hnsw_opts.max_M0 = options_.hnsw_max_M0;
+    hnsw_opts.efConstruction = options_.hnsw_efConstruction;
+    hnsw_opts.efSearch = options_.hnsw_efSearch;
+
+    hnsw_ = std::make_unique<HNSW>(hnsw_opts);
+
+    std::string snapshot_path = db_path_ + "/index.hnsw";
+    if (env->FileExists(snapshot_path)) {
+      Status snap_s = hnsw_->LoadSnapshot(env, snapshot_path);
+      if (snap_s.ok()) {
+        uint64_t snap_nodes = hnsw_->NodeCount();
+        if (snap_nodes < recovered_vec_count) {
+          // Replay tail inserts from recovered_vec_count
+          std::vector<float> tail(flat_vectors_.begin() + snap_nodes * options_.dim,
+                                  flat_vectors_.end());
+          hnsw_->ReplayTail(snap_nodes, tail, options_.dim);
+        }
+      } else {
+        // Corrupt snapshot: rebuild cleanly from flat vectors
+        hnsw_->Rebuild(delete_bitmap_, flat_vectors_, options_.dim);
+      }
+    } else {
+      // No snapshot yet: build from flat vectors
+      hnsw_->Rebuild(delete_bitmap_, flat_vectors_, options_.dim);
+    }
+  }
+
   return Status::OK();
 }
 
@@ -183,6 +219,12 @@ Status VectorIndex::Put(const std::string& key, const float* vector, size_t dim)
   flat_vectors_.insert(flat_vectors_.end(), vector, vector + dim);
   key_to_id_[key] = vid;
   id_to_key_[vid] = key;
+
+  // Insert into HNSW graph index if enabled
+  if (hnsw_) {
+    Status hs = hnsw_->Insert(vid, vector, dim);
+    if (!hs.ok()) return hs;
+  }
 
   // WiscKey separation: commit metadata and pointer to LSM
   WriteBatch batch;
@@ -289,6 +331,38 @@ Status VectorIndex::Search(const float* query_vector, size_t dim, size_t k,
     return Status::OK();
   }
 
+  // Fast path: use HNSW approximate search if available
+  if (hnsw_ && hnsw_->NodeCount() >= k) {
+    std::vector<HNSWSearchResult> hnsw_res;
+    Status hs = hnsw_->Search(query_vector, dim, k, options_.hnsw_efSearch,
+                              &delete_bitmap_, &hnsw_res);
+    if (hs.ok() && !hnsw_res.empty()) {
+      results->clear();
+      results->reserve(hnsw_res.size());
+      for (const auto& r : hnsw_res) {
+        auto kit = id_to_key_.find(r.node_id);
+        if (kit != id_to_key_.end()) {
+          results->push_back({kit->second, r.node_id, r.score});
+        }
+      }
+      return Status::OK();
+    }
+  }
+
+  // Fallback to exact brute-force SIMD search
+  return SearchExact(query_vector, dim, k, results);
+}
+
+Status VectorIndex::SearchExact(const float* query_vector, size_t dim, size_t k,
+                                std::vector<SearchResult>* results) {
+  if (dim != options_.dim) {
+    return Status::InvalidArgument("Query dimension mismatch");
+  }
+  if (k == 0) {
+    results->clear();
+    return Status::OK();
+  }
+
   // Min-heap to maintain Top-K results
   std::priority_queue<SearchResult, std::vector<SearchResult>, std::greater<SearchResult>> top_k;
 
@@ -303,8 +377,6 @@ Status VectorIndex::Search(const float* query_vector, size_t dim, size_t k,
     if (options_.metric == MetricType::kCosine) {
       score = CosineSimilarity(query_vector, candidate, dim);
     } else {
-      // For L2 distance, closer vectors have smaller L2.
-      // We store negative L2 squared so larger score means closer match.
       score = -L2DistanceSquared(query_vector, candidate, dim);
     }
 
@@ -322,7 +394,6 @@ Status VectorIndex::Search(const float* query_vector, size_t dim, size_t k,
     }
   }
 
-  // Extract from min-heap into descending order list
   results->resize(top_k.size());
   for (size_t i = top_k.size(); i > 0; --i) {
     (*results)[i - 1] = top_k.top();
@@ -332,10 +403,68 @@ Status VectorIndex::Search(const float* query_vector, size_t dim, size_t k,
   return Status::OK();
 }
 
+Status VectorIndex::SearchFiltered(
+    const float* query_vector, size_t dim, size_t k,
+    const std::function<bool(const std::string& key)>& filter_fn,
+    std::vector<SearchResult>* results,
+    size_t overfetch) {
+  results->clear();
+  if (k == 0) return Status::OK();
+
+  size_t fetch_k = k * overfetch;
+  std::vector<SearchResult> candidates;
+  Status s = Search(query_vector, dim, fetch_k, &candidates);
+  if (!s.ok()) return s;
+
+  for (const auto& c : candidates) {
+    if (filter_fn(c.key)) {
+      results->push_back(c);
+      if (results->size() >= k) {
+        return Status::OK();
+      }
+    }
+  }
+
+  // If overfetch didn't find k matches, fall back to exact scan
+  if (results->size() < k) {
+    std::vector<SearchResult> all_cands;
+    s = SearchExact(query_vector, dim, flat_vectors_.size() / options_.dim, &all_cands);
+    if (!s.ok()) return s;
+    results->clear();
+    for (const auto& c : all_cands) {
+      if (filter_fn(c.key)) {
+        results->push_back(c);
+        if (results->size() >= k) break;
+      }
+    }
+  }
+  return Status::OK();
+}
+
+Status VectorIndex::RebuildIndex() {
+  if (hnsw_) {
+    Status s = hnsw_->Rebuild(delete_bitmap_, flat_vectors_, options_.dim);
+    if (!s.ok()) return s;
+    return SaveHNSWSnapshot();
+  }
+  return Status::OK();
+}
+
+Status VectorIndex::SaveHNSWSnapshot() {
+  if (hnsw_ && hnsw_->NodeCount() > 0) {
+    std::string snapshot_path = db_path_ + "/index.hnsw";
+    return hnsw_->SaveSnapshot(options_.kv_options.env, snapshot_path);
+  }
+  return Status::OK();
+}
+
 Status VectorIndex::Flush() {
   if (segment_writer_) {
     Status s = segment_writer_->Flush();
     if (!s.ok()) return s;
+  }
+  if (hnsw_) {
+    SaveHNSWSnapshot();
   }
   return Status::OK();
 }
@@ -344,6 +473,9 @@ Status VectorIndex::Sync() {
   if (segment_writer_) {
     Status s = segment_writer_->Sync();
     if (!s.ok()) return s;
+  }
+  if (hnsw_) {
+    SaveHNSWSnapshot();
   }
   return Status::OK();
 }

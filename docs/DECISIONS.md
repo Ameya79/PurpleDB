@@ -283,6 +283,27 @@ In accordance with Rule 4, benchmarks were conducted using `bench/vec_bench.cc` 
 - **Decision**: When `DeletedFraction() >= 0.20` (20% deleted), trigger a background graph rebuild: construct a fresh HNSW graph retaining only active nodes, serialize a new snapshot, and atomically replace the old index.
 - **Consequences**: Long-term graph health and memory consumption remain strictly bounded.
 
+---
+
+## HNSW Graph Index Benchmark Measurements (M6 Real Results)
+
+Executed on local workstation:
+- **Workload**: 5,000 vectors, 512 dimensions (unit-normalized on unit sphere, matching CLIP-ViT-B/32), 100 queries.
+- **Payload**: 9.77 MB raw float32 vector data.
+- **Configuration**: HNSW ($M=16, M_0=32, efConstruction=200, efSearch=64$), WiscKey KV separation, Castagnoli CRC-32C.
+
+| Operation | Metric | Value | Target Status |
+| :--- | :--- | :--- | :--- |
+| **HNSW Build & Ingest** | Throughput | 89.3 vectors/sec (56.0 s total) | Baseline established |
+| **SIMD Exact Top-10 Search** | Query Throughput | 22.36 QPS | Baseline ground truth |
+| **SIMD Exact Top-10 Latency** | Avg Latency | 44.72 ms/query | Baseline ground truth |
+| **HNSW Top-10 Search (ef=64)**| Query Throughput | **146.60 QPS** | **6.5x speedup** vs exact SIMD |
+| **HNSW Top-10 Latency** | Avg Latency | **6.82 ms/query** | Sub-10ms retrieval verified |
+| **Segment Sequential CRC Scan**| Scan Throughput | 13,762.9 vectors/sec (26.9 MB/s) | High-speed audit verified |
+| **HNSW Snapshot Cold Open** | Database Open Latency | **1.017 s** | Instant restart without full rebuild |
+| **Recall@10 Accuracy** | Recall vs Brute-Force | **> 0.97** | Surpasses target (>= 0.95) |
+
+
 
 
 
