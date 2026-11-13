@@ -46,7 +46,7 @@ DBImpl::DBImpl(const Options& options, std::string dbname)
     : options_(options),
       dbname_(std::move(dbname)),
       env_(options.env ? options.env : Env::Default()),
-      versions_(std::make_unique<VersionSet>(dbname_, env_)),
+      versions_(std::make_unique<VersionSet>(dbname_, env_, &options_)),
       mem_(std::make_unique<MemTable>()),
       last_sequence_(0),
       block_cache_(options.block_cache ? options.block_cache : NewLRUCache(8 * 1024 * 1024)) {}
@@ -168,6 +168,7 @@ Status DBImpl::FlushMemTableToOutputFile(MemTable* mem, uint64_t new_log_number)
   TableBuilderOptions tb_opts;
   tb_opts.block_size = options_.block_size;
   tb_opts.comparator = &kInternalKeyBlockComparator;
+  tb_opts.filter_policy = options_.filter_policy;
   TableBuilder builder(tb_opts, file.get());
 
   auto iter = mem->NewIterator();

@@ -5,6 +5,7 @@
 #include <string>
 #include "core/storage/cache.h"
 #include "core/storage/env.h"
+#include "purpledb/filter_policy.h"
 #include "purpledb/slice.h"
 #include "purpledb/status.h"
 #include "purpledb/write_batch.h"
@@ -34,6 +35,11 @@ struct Options {
   // Control block cache (holds uncompressed blocks in memory).
   // If nullptr, PurpleDB will automatically create a default 8 MiB cache.
   std::shared_ptr<Cache> block_cache{nullptr};
+
+  // Filter policy to use for fast Bloom filter rejection checks on point reads.
+  // Default: nullptr (no filter). If set (e.g. NewBloomFilterPolicy(10)),
+  // SSTables generate Bloom filters to avoid reading blocks for missing keys.
+  const FilterPolicy* filter_policy{nullptr};
 };
 
 struct WriteOptions {

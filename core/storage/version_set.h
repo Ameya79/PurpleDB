@@ -14,6 +14,7 @@
 
 namespace purpledb {
 
+struct Options;
 class VersionSet;
 
 static const int kNumLevels = 7;
@@ -68,7 +69,7 @@ class Version {
  */
 class VersionSet {
  public:
-  VersionSet(std::string dbname, Env* env);
+  VersionSet(std::string dbname, Env* env, const Options* options = nullptr);
   ~VersionSet();
 
   VersionSet(const VersionSet&) = delete;
@@ -82,6 +83,8 @@ class VersionSet {
 
   // Current version. Caller does not take ownership.
   Version* current() const { return current_; }
+
+  const Options* options() const { return options_; }
 
   uint64_t ManifestFileNumber() const { return manifest_file_number_; }
   uint64_t NextFileNumber() const { return next_file_number_; }
@@ -108,6 +111,7 @@ class VersionSet {
 
   std::string dbname_;
   Env* env_;
+  const Options* options_{nullptr};
   uint64_t next_file_number_{1};
   uint64_t manifest_file_number_{0};
   uint64_t last_sequence_{0};

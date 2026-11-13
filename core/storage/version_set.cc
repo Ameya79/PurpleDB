@@ -8,6 +8,7 @@
 #include "core/storage/wal_reader.h"
 #include "core/util/coding.h"
 #include "core/util/logging.h"
+#include "purpledb/db.h"
 #include "purpledb/write_batch.h"
 
 namespace purpledb {
@@ -45,33 +46,16 @@ bool Version::Get(const Slice& user_key, SequenceNumber snapshot_seq,
     }
 
     static const InternalKeyBlockComparator kInternalKeyBlockComparator;
-    auto iter = table->NewIterator(&kInternalKeyBlockComparator);
     // Build internal lookup key: user_key + max tag for snapshot_seq
     std::string lookup_key;
     lookup_key.append(user_key.data(), user_key.size());
     PutFixed64(&lookup_key, (snapshot_seq << 8) | static_cast<uint8_t>(kTypeValue));
 
-    iter->Seek(Slice(lookup_key));
-    if (iter->Valid()) {
-      Slice found_key = iter->key();
-      if (found_key.size() >= 8) {
-        Slice found_user(found_key.data(), found_key.size() - 8);
-        if (found_user == user_key) {
-          uint64_t tag = DecodeFixed64(found_key.data() + found_key.size() - 8);
-          ValueType type = static_cast<ValueType>(tag & 0xff);
-          if (type == kTypeValue) {
-            *val = iter->value().ToString();
-            *s = Status::OK();
-            return true;
-          } else if (type == kTypeDeletion) {
-            *s = Status::NotFound(user_key, "deleted");
-            return true;
-          }
-        }
-      }
+    Cache* block_cache = (vset_->options() != nullptr) ? vset_->options()->block_cache.get() : nullptr;
+    if (table->InternalGet(Slice(lookup_key), &kInternalKeyBlockComparator, val, s, block_cache)) {
+      return true;
     }
-    if (!iter->status().ok()) {
-      *s = iter->status();
+    if (!s->ok()) {
       return true;
     }
   }
@@ -124,9 +108,10 @@ class VersionSet::Builder {
   std::vector<FileMetaData> added_files_[kNumLevels];
 };
 
-VersionSet::VersionSet(std::string dbname, Env* env)
+VersionSet::VersionSet(std::string dbname, Env* env, const Options* options)
     : dbname_(std::move(dbname)),
       env_(env),
+      options_(options),
       dummy_versions_(this) {
   AppendVersion(new Version(this));
 }
@@ -164,7 +149,8 @@ Status VersionSet::GetTable(uint64_t file_number, uint64_t file_size,
   Status s = env_->NewRandomAccessFile(fname, &file);
   if (!s.ok()) return s;
 
-  return Table::Open(std::move(file), file_size, table);
+  const FilterPolicy* filter_policy = options_ ? options_->filter_policy : nullptr;
+  return Table::Open(std::move(file), file_size, table, filter_policy);
 }
 
 Status VersionSet::LogAndApply(VersionEdit* edit) {
