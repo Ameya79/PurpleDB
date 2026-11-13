@@ -14,12 +14,18 @@ namespace test {
 
 class M8AcceptanceTest {
  public:
-  M8AcceptanceTest() : env_(Env::Default()) {
-    test_dir_ = "./m8_acceptance_test_dir";
+  explicit M8AcceptanceTest(const std::string& prefix = "m8_acc") : env_(Env::Default()) {
+    static std::atomic<int> counter{0};
+    test_dir_ = "./" + prefix + "_" + std::to_string(++counter);
+    Cleanup();
     env_->CreateDir(test_dir_);
   }
 
   ~M8AcceptanceTest() {
+    Cleanup();
+  }
+
+  void Cleanup() {
     std::vector<std::string> children;
     if (env_->GetChildren(test_dir_, &children).ok()) {
       for (const auto& f : children) {

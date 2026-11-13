@@ -394,6 +394,29 @@ Executed on local workstation:
   - Validate concurrency under ThreadSanitizer (TSan).
 - **Consequences**: Concurrent search queries execute in parallel with zero data races.
 
+---
+
+### ADR-036: Native Python Extension via pybind11 & GIL Release Semantics
+- **Date**: 2026-11-13
+- **Context**: Python applications (FastAPI, Flask, Django) require high-throughput in-process database access without blocking the Python Global Interpreter Lock (GIL) during heavy operations such as video decoding, batch embedding, and vector index search.
+- **Decision**:
+  - Implement the `purpledb` Python native module using `pybind11` binding against the C++ `QueryEngine` and stable C ABI.
+  - Release the GIL (`py::gil_scoped_release`) during `add_video`, `search`, and `delete_video` calls.
+  - Expose Pythonic context manager protocols (`with purpledb.open(...) as db:`).
+  - Map C++ `Status` failures directly to standard Python exceptions (`FileNotFoundError`, `ValueError`, `RuntimeError`).
+- **Consequences**: Web frameworks can run CPU-intensive video search queries concurrently across multiple asynchronous worker threads without stalling event loops.
+
+---
+
+### ADR-037: Type Stubs (PEP 484/561) & Standalone Wheel Packaging
+- **Date**: 2026-11-13
+- **Context**: Modern Python development requires static type validation (mypy, pyright) and rich IDE autocompletion (VS Code, PyCharm), as well as seamless installation without requiring a C++ toolchain on end-user machines.
+- **Decision**:
+  - Distribute PEP 561 compliant `.pyi` type stub files and `py.typed` markers inside the package directory.
+  - Configure `pyproject.toml` and `setup.py` with standard `setuptools` and `pybind11.setup_helpers`.
+  - Package binary wheels targeting Linux, macOS (Intel + Apple Silicon), and Windows via `cibuildwheel`.
+- **Consequences**: Users can run `pip install purpledb` on any major OS and receive immediate type checking and autocompletion without compiling C++ code.
+
 
 
 

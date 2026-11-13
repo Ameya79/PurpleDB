@@ -35,6 +35,9 @@ bench_*_data/
 *.dll
 *.so
 *.dylib
+*.pyd
+*.egg-info/
+dist/
 *.o
 *.obj
 compile_commands.json
