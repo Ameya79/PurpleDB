@@ -54,7 +54,9 @@ set(PURPLEDB_CORE_SOURCES
   core/storage/wal_reader.cc
   core/storage/wal_writer.cc
   core/storage/write_batch.cc
+  core/util/arena.cc
   core/util/coding.cc
+  core/util/iterator.cc
   core/util/logging.cc
   core/util/slice.cc
   core/util/status.cc
@@ -79,6 +81,8 @@ set(PURPLEDB_TEST_SOURCES
   tests/crc32c_test.cc
   tests/coding_test.cc
   tests/logging_test.cc
+  tests/arena_test.cc
+  tests/skiplist_test.cc
   tests/env_test.cc
   tests/wal_test.cc
   tests/write_batch_test.cc
