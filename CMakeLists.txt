@@ -84,6 +84,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/write_batch_test.cc
   tests/memtable_test.cc
   tests/db_test.cc
+  tests/m2_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
