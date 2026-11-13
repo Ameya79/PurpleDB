@@ -36,3 +36,4 @@ bool Compaction::IsBaseLevelForKey(const Slice& user_key) const {
 }
 
 }  // namespace purpledb
+

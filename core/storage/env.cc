@@ -364,12 +364,27 @@ class PosixEnv : public Env {
   }
 
   Status RenameFile(const std::string& src, const std::string& target) override {
+#if defined(_WIN32)
+    for (int retry = 0; retry < 100; ++retry) {
+      if (::MoveFileExA(src.c_str(), target.c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        return Status::OK();
+      }
+      DWORD err = ::GetLastError();
+      if (err != ERROR_ACCESS_DENIED && err != ERROR_SHARING_VIOLATION) {
+        return Status::IOError(src, "MoveFileEx error " + std::to_string(err));
+      }
+      ::Sleep(5);
+    }
+    return Status::IOError(src, "MoveFileEx error: access denied or sharing violation after retries");
+#else
     std::error_code ec;
     fs::rename(src, target, ec);
     if (ec) {
       return Status::IOError(src, ec.message());
     }
     return Status::OK();
+#endif
   }
 };
 

@@ -355,6 +355,8 @@ Status VersionSet::LogAndApply(VersionEdit* edit) {
       if (s.ok()) {
         descriptor_log_ = std::make_unique<wal::WalWriter>(descriptor_file_.get(), manifest_size);
       }
+      // Manifest file already exists and CURRENT already points to it.
+      new_manifest_file.clear();
     } else {
       s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
       if (s.ok()) {

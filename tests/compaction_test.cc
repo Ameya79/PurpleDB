@@ -99,3 +99,4 @@ TEST(CompactionTest, L0ToL1MergeAndDeduplication) {
 }
 
 }  // namespace purpledb
+

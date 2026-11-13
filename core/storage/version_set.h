@@ -112,6 +112,10 @@ class VersionSet {
   uint64_t LogNumber() const { return log_number_; }
   uint64_t PrevLogNumber() const { return prev_log_number_; }
 
+  size_t NumLevelFiles(int level) const {
+    return current_ ? current_->NumLevelFiles(level) : 0;
+  }
+
   // Returns the level most in need of compaction, or -1 if no level needs compaction.
   int PickCompactionLevel() const;
 

@@ -1,6 +1,8 @@
 #include "core/storage/db_impl.h"
 
 #include <algorithm>
+#include <chrono>
+#include <unordered_set>
 #include "core/storage/compaction.h"
 #include "core/storage/db_iter.h"
 #include "core/storage/filename.h"
@@ -53,12 +55,21 @@ DBImpl::DBImpl(const Options& options, std::string dbname)
       versions_(std::make_unique<VersionSet>(dbname_, env_, &options_)),
       mem_(std::make_unique<MemTable>()),
       last_sequence_(0),
-      block_cache_(options.block_cache ? options.block_cache : NewLRUCache(8 * 1024 * 1024)) {}
+      block_cache_(options.block_cache ? options.block_cache : NewLRUCache(8 * 1024 * 1024)) {
+  bg_thread_ = std::thread(&DBImpl::BackgroundThreadEntry, this);
+}
 
 DBImpl::~DBImpl() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (log_file_) {
-    log_file_->Close();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    shutting_down_ = true;
+    bg_cv_.notify_all();
+    if (log_file_) {
+      log_file_->Close();
+    }
+  }
+  if (bg_thread_.joinable()) {
+    bg_thread_.join();
   }
 }
 
@@ -93,6 +104,7 @@ Status DBImpl::Recover() {
     if (!s.ok()) return s;
 
     log_ = std::make_unique<wal::WalWriter>(log_file_.get());
+    recovered_ = true;
     return Status::OK();
   }
 
@@ -153,6 +165,10 @@ Status DBImpl::Recover() {
 
   log_ = std::make_unique<wal::WalWriter>(log_file_.get());
   versions_->SetLastSequence(last_sequence_);
+
+  RemoveOrphanFiles();
+  recovered_ = true;
+  MaybeScheduleCompaction();
 
   return Status::OK();
 }
@@ -234,6 +250,7 @@ Status DBImpl::MaybeFlushMemTable() {
     log_number_ = new_log_number;
     imm_.reset();
   }
+  MaybeScheduleCompaction();
 
   return s;
 }
@@ -264,6 +281,7 @@ Status DBImpl::FlushMemTable() {
     log_number_ = new_log_number;
     imm_.reset();
   }
+  MaybeScheduleCompaction();
   return s;
 }
 
@@ -284,7 +302,21 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
     return Status::OK();
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
+
+  // Backpressure & write throttling:
+  // If Level 0 has too many files, compaction is falling behind.
+  // Slow down writes at >= 8 files, hard stop/stall at >= 12 files.
+  while (!shutting_down_ && versions_->NumLevelFiles(0) >= 12) {
+    MaybeScheduleCompaction();
+    bg_cv_.wait(lock);
+  }
+  if (shutting_down_) {
+    return Status::Corruption("database is shutting down");
+  }
+  if (versions_->NumLevelFiles(0) >= 8) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
 
   // Check if MemTable needs flush
   Status s = MaybeFlushMemTable();
@@ -309,6 +341,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   if (s.ok()) {
     versions_->SetLastSequence(last_sequence_);
   }
+  MaybeScheduleCompaction();
   return s;
 }
 
@@ -374,7 +407,9 @@ Status DBImpl::CompactOnce() {
   if (c == nullptr) {
     return Status::OK();
   }
-  return DoCompactionWork(c.get());
+  Status s = DoCompactionWork(c.get());
+  bg_cv_.notify_all();
+  return s;
 }
 
 Status DBImpl::DoCompactionWork(Compaction* c) {
@@ -510,6 +545,116 @@ Status DBImpl::DoCompactionWork(Compaction* c) {
   }
 
   return Status::OK();
+}
+
+void DBImpl::MaybeScheduleCompaction() {
+  if (bg_compaction_scheduled_) {
+    return;
+  }
+  if (shutting_down_ || !recovered_) {
+    return;
+  }
+  if (imm_ == nullptr && versions_->PickCompactionLevel() < 0) {
+    return;
+  }
+  bg_compaction_scheduled_ = true;
+  bg_cv_.notify_one();
+}
+
+void DBImpl::BackgroundThreadEntry() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  while (!shutting_down_) {
+    while (!shutting_down_ && (!recovered_ || !bg_compaction_scheduled_)) {
+      bg_cv_.wait(lock);
+    }
+    if (shutting_down_) {
+      break;
+    }
+
+    if (imm_ != nullptr) {
+      uint64_t new_log_number = versions_->NewFileNumber();
+      if (log_file_) {
+        log_file_->Close();
+      }
+      log_.reset();
+      log_file_.reset();
+      Status s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &log_file_);
+      if (s.ok()) {
+        log_ = std::make_unique<wal::WalWriter>(log_file_.get());
+        s = FlushMemTableToOutputFile(imm_.get(), new_log_number);
+        if (s.ok()) {
+          env_->DeleteFile(LogFileName(dbname_, log_number_));
+          log_number_ = new_log_number;
+          imm_.reset();
+        }
+      }
+    } else {
+      auto c = versions_->PickCompaction();
+      if (c != nullptr) {
+        DoCompactionWork(c.get());
+      }
+    }
+
+    bg_compaction_scheduled_ = false;
+    bg_cv_.notify_all();
+
+    // Check if more compaction work is needed
+    if (imm_ != nullptr || versions_->PickCompactionLevel() >= 0) {
+      bg_compaction_scheduled_ = true;
+    }
+  }
+}
+
+void DBImpl::RemoveOrphanFiles() {
+  std::vector<std::string> filenames;
+  Status s = env_->GetChildren(dbname_, &filenames);
+  if (!s.ok()) {
+    return;
+  }
+
+  std::unordered_set<uint64_t> live_sstables;
+  if (versions_->current() != nullptr) {
+    for (int l = 0; l < kNumLevels; ++l) {
+      for (const auto& f : versions_->current()->files(l)) {
+        live_sstables.insert(f.number);
+      }
+    }
+  }
+
+  uint64_t current_manifest = versions_->ManifestFileNumber();
+  uint64_t current_log = log_number_;
+  uint64_t prev_log = versions_->PrevLogNumber();
+
+  for (const auto& fname : filenames) {
+    uint64_t number = 0;
+    FileType type;
+    if (ParseFileName(fname, &number, &type)) {
+      bool keep = true;
+      switch (type) {
+        case kLogFile:
+          keep = (number == current_log || (prev_log > 0 && number == prev_log));
+          break;
+        case kDescriptorFile:
+          keep = (number >= current_manifest);
+          break;
+        case kTableFile:
+          keep = (live_sstables.find(number) != live_sstables.end());
+          break;
+        case kTempFile:
+          keep = false;
+          break;
+        case kCurrentFile:
+        case kDBLockFile:
+        case kInfoLogFile:
+          keep = true;
+          break;
+      }
+
+      if (!keep) {
+        env_->DeleteFile(dbname_ + "/" + fname);
+      }
+    }
+  }
 }
 
 }  // namespace purpledb

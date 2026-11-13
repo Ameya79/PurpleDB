@@ -373,4 +373,85 @@ TEST(DBTest, IteratorTraversalAcrossMemTableAndSSTables) {
   env->DeleteDir(dbname);
 }
 
+TEST(DBTest, BackgroundCompactionClearsL0) {
+  Env* env = Env::Default();
+  std::string dbname = "test_db_bg_compaction";
+  env->DeleteDir(dbname);
+
+  Options options;
+  options.create_if_missing = true;
+  std::unique_ptr<DB> db;
+  ASSERT_STATUS_OK(DB::Open(options, dbname, &db));
+  auto* impl = static_cast<DBImpl*>(db.get());
+
+  for (int i = 0; i < 5; ++i) {
+    ASSERT_STATUS_OK(db->Put(Slice("k" + std::to_string(i)), Slice("v" + std::to_string(i))));
+    ASSERT_STATUS_OK(impl->FlushMemTable());
+  }
+
+  // After 5 flushes, L0 has >= 4 files which triggers background compaction.
+  // Wait up to 2 seconds for background thread to compact L0 to L1.
+  for (int retry = 0; retry < 200; ++retry) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  // Verify all keys are readable
+  for (int i = 0; i < 5; ++i) {
+    std::string val;
+    ASSERT_STATUS_OK(db->Get(Slice("k" + std::to_string(i)), &val));
+    ASSERT_EQ(val, "v" + std::to_string(i));
+  }
+
+  db.reset();
+  env->DeleteDir(dbname);
+}
+
+TEST(DBTest, OrphanFileCleanupOnOpen) {
+  Env* env = Env::Default();
+  std::string dbname = "test_db_orphan_cleanup";
+  env->DeleteDir(dbname);
+
+  Options options;
+  options.create_if_missing = true;
+  std::unique_ptr<DB> db;
+  ASSERT_STATUS_OK(DB::Open(options, dbname, &db));
+
+  ASSERT_STATUS_OK(db->Put(Slice("real_key"), Slice("real_val")));
+  auto* impl = static_cast<DBImpl*>(db.get());
+  ASSERT_STATUS_OK(impl->FlushMemTable());
+
+  // Close DB
+  db.reset();
+
+  // Create orphan files: a fake .sst with high number and a .dbtmp file
+  std::string orphan_sst = dbname + "/999999.sst";
+  std::string orphan_tmp = dbname + "/888888.dbtmp";
+  std::unique_ptr<WritableFile> wf;
+  ASSERT_STATUS_OK(env->NewWritableFile(orphan_sst, &wf));
+  ASSERT_STATUS_OK(wf->Append(Slice("garbage sst data")));
+  ASSERT_STATUS_OK(wf->Close());
+
+  ASSERT_STATUS_OK(env->NewWritableFile(orphan_tmp, &wf));
+  ASSERT_STATUS_OK(wf->Append(Slice("incomplete tmp data")));
+  ASSERT_STATUS_OK(wf->Close());
+
+  ASSERT_TRUE(env->FileExists(orphan_sst));
+  ASSERT_TRUE(env->FileExists(orphan_tmp));
+
+  // Reopen DB - Recover() should trigger RemoveOrphanFiles()
+  ASSERT_STATUS_OK(DB::Open(options, dbname, &db));
+
+  // The orphan files should have been wiped
+  ASSERT_FALSE(env->FileExists(orphan_sst));
+  ASSERT_FALSE(env->FileExists(orphan_tmp));
+
+  // Real data must still be accessible
+  std::string val;
+  ASSERT_STATUS_OK(db->Get(Slice("real_key"), &val));
+  ASSERT_EQ(val, "real_val");
+
+  db.reset();
+  env->DeleteDir(dbname);
+}
+
 }  // namespace purpledb
