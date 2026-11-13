@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <iostream>
 #include <unordered_set>
 #include "core/storage/compaction.h"
 #include "core/storage/db_iter.h"
@@ -211,11 +212,13 @@ Status DBImpl::FlushMemTableToOutputFile(MemTable* mem, uint64_t new_log_number)
   }
   file.reset();
 
-  if (s.ok() && builder.NumEntries() > 0) {
+  if (s.ok()) {
     VersionEdit edit;
     edit.SetLogNumber(new_log_number);
-    edit.AddFile(0, file_number, builder.FileSize(), Slice(smallest_key),
-                 Slice(largest_key));
+    if (builder.NumEntries() > 0) {
+      edit.AddFile(0, file_number, builder.FileSize(), Slice(smallest_key),
+                   Slice(largest_key));
+    }
     s = versions_->LogAndApply(&edit);
   }
 
@@ -223,7 +226,7 @@ Status DBImpl::FlushMemTableToOutputFile(MemTable* mem, uint64_t new_log_number)
 }
 
 Status DBImpl::MaybeFlushMemTable() {
-  if (mem_->ApproximateMemoryUsage() < options_.write_buffer_size) {
+  if (mem_->Count() == 0 || mem_->ApproximateMemoryUsage() < options_.write_buffer_size) {
     return Status::OK();
   }
 
@@ -525,6 +528,10 @@ Status DBImpl::DoCompactionWork(Compaction* c) {
   s = finish_compaction_output();
   if (!s.ok()) return s;
 
+  // Release all input iterators and tables so open file handles are closed
+  input.reset();
+  input_iters.clear();
+
   // Mark input files for deletion in manifest
   for (int which = 0; which < 2; ++which) {
     int lvl = (which == 0) ? c->level() : c->level() + 1;
@@ -532,6 +539,9 @@ Status DBImpl::DoCompactionWork(Compaction* c) {
       c->edit()->RemoveFile(lvl, f.number);
     }
   }
+
+  // Preserve current log number in compaction edit
+  c->edit()->SetLogNumber(log_number_);
 
   // Atomically apply compaction edit to VersionSet
   s = versions_->LogAndApply(c->edit());

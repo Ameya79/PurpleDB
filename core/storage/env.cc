@@ -4,6 +4,7 @@
 #include <cstring>
 #include <filesystem>
 #include <algorithm>
+#include <iostream>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -258,7 +259,8 @@ class PosixEnv : public Env {
                              std::unique_ptr<RandomAccessFile>* result) override {
 #if defined(_WIN32)
     HANDLE handle = ::CreateFileA(
-        fname.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        fname.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (handle == INVALID_HANDLE_VALUE) {
       return Status::NotFound(fname, "cannot open file for random read");

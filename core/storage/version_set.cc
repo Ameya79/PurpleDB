@@ -383,8 +383,12 @@ Status VersionSet::LogAndApply(VersionEdit* edit) {
   // Install new version
   if (s.ok()) {
     AppendVersion(v);
-    log_number_ = edit->log_number();
-    prev_log_number_ = edit->prev_log_number();
+    if (edit->has_log_number()) {
+      log_number_ = edit->log_number();
+    }
+    if (edit->has_prev_log_number()) {
+      prev_log_number_ = edit->prev_log_number();
+    }
   } else {
     delete v;
     if (!new_manifest_file.empty()) {
