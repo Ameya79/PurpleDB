@@ -47,9 +47,12 @@ find_package(Threads REQUIRED)
 
 # Core library sources
 set(PURPLEDB_CORE_SOURCES
+  core/storage/block.cc
+  core/storage/block_builder.cc
   core/storage/crc32c.cc
   core/storage/db_impl.cc
   core/storage/env.cc
+  core/storage/format.cc
   core/storage/memtable.cc
   core/storage/wal_reader.cc
   core/storage/wal_writer.cc
@@ -83,6 +86,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/logging_test.cc
   tests/arena_test.cc
   tests/skiplist_test.cc
+  tests/block_test.cc
   tests/env_test.cc
   tests/wal_test.cc
   tests/write_batch_test.cc

@@ -28,13 +28,22 @@ class TestRunner {
     tests_.push_back({suite, name, func});
   }
 
-  int RunAll() {
+  int RunAll(const std::string& filter = "") {
     int passed = 0;
     int failed = 0;
-    std::cout << "[==========] Running " << tests_.size() << " test(s).\n";
+    std::vector<TestCase> to_run;
+    for (const auto& t : tests_) {
+      std::string full_name = t.suite + "." + t.name;
+      if (filter.empty() || full_name.find(filter) != std::string::npos ||
+          t.suite.find(filter) != std::string::npos) {
+        to_run.push_back(t);
+      }
+    }
+
+    std::cout << "[==========] Running " << to_run.size() << " test(s).\n";
     auto start = std::chrono::high_resolution_clock::now();
 
-    for (const auto& t : tests_) {
+    for (const auto& t : to_run) {
       std::cout << "[ RUN      ] " << t.suite << "." << t.name << "\n";
       current_failed_ = false;
       current_failure_msg_.clear();
@@ -62,7 +71,7 @@ class TestRunner {
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> elapsed = end - start;
-    std::cout << "[==========] " << tests_.size() << " test(s) ran ("
+    std::cout << "[==========] " << to_run.size() << " test(s) ran ("
               << elapsed.count() << " ms total).\n";
     std::cout << "[  PASSED  ] " << passed << " test(s).\n";
     if (failed > 0) {
