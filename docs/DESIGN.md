@@ -535,4 +535,54 @@ System crashes or abrupt power loss during compaction or flushing can leave unco
 7. **Write Backpressure & Two-Tier Throttling**: Why high-throughput LSM engines use soft sleep slowdowns followed by hard condition-variable stalls to prevent write storms from overwhelming compaction threads.
 8. **Crash-Safe Orphan Purging**: How manifest-driven file set recovery identifies and unlinks abandoned crash artifacts on database startup.
 
+---
+
+# PurpleDB Architecture & Design Rationale — Milestone M5 (Vector Storage & Brute-Force Search)
+
+Milestone M5 marks the transition from a pure key-value store (`purpledb-kv`) to a multimodal vector database.
+
+## 1. WiscKey Vector-LSM Key-Value Separation
+In standard LSM databases, storing large values (e.g., 512-dimensional float32 vector embeddings = 2,048 bytes) directly inside SSTables creates catastrophic write amplification. During leveled compaction, an SSTable is rewritten up to 30 times across Levels 0 through 6. For 1 GB of vectors, that translates to 30 GB of SSD flash writes, exhausting hardware endurance and bottlenecking ingestion.
+
+- **The Solution**: In PurpleDB, vectors are written once sequentially into append-only `.vec` segment files.
+- **The LSM Role**: The LSM tree stores only lightweight 8-byte `VectorId` integers, user keys, and moment timestamps.
+- **Result**: Compaction write amplification for vector data drops from $30\times$ to strictly $1\times$.
+
+## 2. SIMD Acceleration (AVX2 and ARM NEON)
+Vector search requires computing geometric distances across thousands or millions of dimensions.
+- **AVX2 (Advanced Vector Extensions 2)**: Uses 256-bit registers (`__m256`) to process 8 float32 values simultaneously per instruction cycle. Fused Multiply-Add (FMA) executes $a \times b + c$ in a single CPU clock cycle.
+- **ARM NEON**: Uses 128-bit registers (`float32x4_t`) on Apple Silicon and modern ARM64 servers, processing 4 floats simultaneously.
+- **Auto-Vectorization Friendly Fallback**: Clean loop unrolling ensures compilers generate vectorized instructions even on platforms without manual intrinsics.
+
+## 3. Symmetric Int8 Scalar Quantization
+Storing millions of 512-dimensional vectors in RAM requires significant memory bandwidth (20.48 MB per 10,000 vectors).
+- **Quantization Formula**: Maps continuous 32-bit floating point values into 8-bit signed integers:
+  $$\text{scale} = \frac{\max_i |v_i|}{127.0f}, \quad q_i = \text{clamp}\left(\text{round}\left(\frac{v_i}{\text{scale}}\right), -127, 127\right)$$
+- **Memory Footprint**: Compresses vector size from 2,048 bytes down to 516 bytes (a $4\times$ reduction).
+- **Accuracy**: Quantized cosine similarity achieves $< 0.02$ error on unit hyperspheres, retaining near-identical ranking for nearest neighbor search.
+
+## 4. DeleteBitmap: O(1) Tombstone Filtering
+Physically removing a vector from an append-only segment or re-indexing after every delete operation would cause severe random I/O and latency spikes.
+- **Bitset Representation**: Each vector is indexed by a 64-bit integer `VectorId`. A dense array of 64-bit words stores a bit per vector.
+- **Bit Test**: During search, before computing dot products or touching disk, the query evaluates `IsDeleted(vid)`. If the bit is set (`1`), the vector is skipped in $O(1)$ CPU time.
+- **Rebuild Trigger**: Tracking `DeletedFraction()` enables background reorganization when tombstones exceed operational thresholds (e.g. 20%).
+
+## 5. Chunk-Framed Castagnoli CRC-32C Verification
+To prevent partial writes or power failures from corrupting vector segments:
+- Writes are grouped into chunks of $K$ vectors (e.g. 64 vectors).
+- Each chunk is immediately followed by a 4-byte Castagnoli CRC-32C checksum.
+- On recovery, readers sequentially verify each chunk's checksum. If a crash leaves a partial or torn chunk at the tail of the file, recovery halts cleanly at the last intact chunk, discarding the corrupt tail.
+
+---
+
+## What You Should Understand Now (Milestone M5 Concepts)
+1. **WiscKey Key-Value Separation**: Why separating large values (vector embeddings) from index keys eliminates LSM compaction write amplification ($30\times \rightarrow 1\times$).
+2. **SIMD Vectorization**: How CPU vector registers (AVX2 256-bit and ARM NEON 128-bit) compute 8 or 4 floating point multiplications in parallel in a single hardware clock cycle.
+3. **Scalar Quantization**: How symmetric int8 quantization compresses 32-bit floats by $4\times$ with negligible loss in cosine similarity ranking.
+4. **Delete Bitmap Pattern**: Why high-throughput vector stores avoid physical deletes on disk, using fast in-memory bit tests to tombstone vectors in $O(1)$ time.
+5. **Chunk-Framed Checksums**: How grouping append-only writes into verified chunks allows deterministic recovery and torn-write detection without write-ahead logging overhead for bulk data.
+6. **Model Lock Safety**: Why multimodal databases must enforce invariant checks on vector dimension, metric, and model ID to prevent corrupting similarity spaces across different embedding models.
+7. **Top-K Bounded Priority Queue**: How a min-heap of size $K$ extracts the top $K$ nearest neighbors in $O(N \log K)$ time and $O(K)$ auxiliary memory without sorting all $N$ candidates.
+
+
 

@@ -125,3 +125,4 @@ class VectorSegmentReader {
 };
 
 }  // namespace purpledb
+

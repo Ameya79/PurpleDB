@@ -73,3 +73,4 @@ float L2DistanceSquaredScalar(const float* a, const float* b, size_t dim);
 int32_t DotProductInt8Scalar(const int8_t* a, const int8_t* b, size_t dim);
 
 }  // namespace purpledb
+

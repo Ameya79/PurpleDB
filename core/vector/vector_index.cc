@@ -115,6 +115,12 @@ Status VectorIndex::Recover() {
     if (!s.ok()) return s;
   }
 
+  uint64_t recovered_vec_count = flat_vectors_.size() / options_.dim;
+  if (next_vector_id_ > recovered_vec_count) {
+    // A crash or torn write occurred: truncate next_vector_id_ to match durable vectors
+    next_vector_id_ = recovered_vec_count;
+  }
+
   // Re-open active segment writer in append mode or create
   s = VectorSegmentWriter::Create(env, segment_path, options_.dim,
                                   options_.dtype, options_.metric,
@@ -122,11 +128,11 @@ Status VectorIndex::Recover() {
                                   &segment_writer_);
   if (!s.ok()) return s;
 
-  // Re-populate existing vectors if any into the writer buffer so future appends align
-  // In M5, active segment re-creates with full vectors loaded in memory cache
-  for (size_t i = 0; i < flat_vectors_.size() / options_.dim; ++i) {
+  // Re-populate existing vectors into the writer buffer so future appends align
+  for (size_t i = 0; i < recovered_vec_count; ++i) {
     segment_writer_->Append(flat_vectors_.data() + i * options_.dim, options_.dim);
   }
+  segment_writer_->Flush();
 
   // 5. Rebuild key_to_id_ and id_to_key_ from LSM tree
   std::unique_ptr<Iterator> it = db_->NewIterator(ReadOptions());
@@ -141,9 +147,11 @@ Status VectorIndex::Recover() {
     Slice v = it->value();
     if (v.size() >= 8) {
       uint64_t vid = DecodeFixed64(v.data());
-      if (!delete_bitmap_.IsDeleted(vid)) {
+      if (vid < recovered_vec_count && !delete_bitmap_.IsDeleted(vid)) {
         key_to_id_[user_key] = vid;
         id_to_key_[vid] = user_key;
+      } else if (vid >= recovered_vec_count) {
+        delete_bitmap_.MarkDeleted(vid);
       }
     }
   }

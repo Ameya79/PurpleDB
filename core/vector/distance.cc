@@ -298,3 +298,4 @@ float CosineSimilarityInt8(const int8_t* a, float scale_a,
 }
 
 }  // namespace purpledb
+

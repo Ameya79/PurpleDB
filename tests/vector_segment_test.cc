@@ -217,3 +217,4 @@ TEST(VectorSegmentTest, CrashTruncationRecovery) {
 
 }  // namespace test
 }  // namespace purpledb
+

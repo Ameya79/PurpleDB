@@ -75,3 +75,4 @@ class DeleteBitmap {
 };
 
 }  // namespace purpledb
+

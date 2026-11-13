@@ -402,3 +402,4 @@ Status VectorSegmentReader::ReadAllVectors(std::vector<float>* flat_vectors) con
 }
 
 }  // namespace purpledb
+

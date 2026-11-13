@@ -122,6 +122,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/delete_bitmap_test.cc
   tests/vector_segment_test.cc
   tests/vector_index_test.cc
+  tests/m5_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
@@ -137,6 +138,13 @@ add_test(NAME purpledb_tests COMMAND purpledb_tests)
 add_executable(db_bench bench/db_bench.cc)
 target_link_libraries(db_bench PRIVATE purpledb_core Threads::Threads)
 target_include_directories(db_bench PRIVATE
+  core/include
+  core
+)
+
+add_executable(vec_bench bench/vec_bench.cc)
+target_link_libraries(vec_bench PRIVATE purpledb_core Threads::Threads)
+target_include_directories(vec_bench PRIVATE
   core/include
   core
 )

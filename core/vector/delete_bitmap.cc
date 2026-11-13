@@ -164,3 +164,4 @@ Status DeleteBitmap::Deserialize(const Slice& src) {
 }
 
 }  // namespace purpledb
+

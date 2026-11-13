@@ -83,6 +83,18 @@ Benchmarks measured with `bench/db_bench.cc` on Windows 11 (UCRT64 GCC 16.1.0 C+
 
 ---
 
+## Vector Storage & SIMD Search Benchmarks (Milestone M5)
+
+Benchmarks measured with `bench/vec_bench.cc` across 10,000 512-dimensional vectors (CLIP ViT-B/32 geometry, 19.53 MB raw float32 payload) with append-only `.vec` segment files:
+
+| Benchmark Operation | Measured Throughput | Measured Bandwidth | Latency / Time |
+| :--- | :--- | :--- | :--- |
+| **vec_ingest** (Put + Sync) | **2,998 vectors/sec** | **5.9 MB/sec** | 3.3 sec total for 10K 512-d vectors |
+| **vec_search_top10 (SIMD)** | **20.00 QPS** | — | **50.00 ms/query** (exact brute force across 10K vectors) |
+| **vec_segment_scan (CRC)** | **26,006 vectors/sec** | **50.8 MB/sec** | 0.4 sec total scan & Castagnoli CRC verify |
+
+---
+
 ## Milestone Progress
 
 | Milestone | Title | Focus & Deliverables | Status |
@@ -92,11 +104,11 @@ Benchmarks measured with `bench/db_bench.cc` on Windows 11 (UCRT64 GCC 16.1.0 C+
 | **M2** | Durable KV Store | WAL with 32 KiB framing, WriteBatch atomicity, crash recovery, prefix invariance | `m2-done` |
 | **M3** | SSTables & MemTable | SkipList, prefix compression, 48-byte footers, sharded LRU cache, MANIFEST | `m3-done` |
 | **M4** | Compaction & Bloom Filters | Leveled compaction, Bloom filters, K-way merge, snapshots, write throttling | `m4-done` |
-| **M5** | Vector Storage & Search | Append-only `.vec` segment files, WiscKey separation, flat cosine search | Upcoming |
-| **M6** | Vector Indexing (IVF / HNSW) | Partitioned inverted lists, quantization, sub-millisecond approximate NN | Planned |
-| **M7** | Metadata & Query Planner | Filtering with vector search, single-pass filtering, advisory process locks | Planned |
-| **M8** | Video Ingestion Pipeline | C++ FFmpeg subprocess wrapper, scene segmenter, ONNX Runtime CLIP inference | Planned |
-| **M9** | Python Wheels & Final Delivery | pybind11 bindings, wheels for Linux/macOS/Windows, documentation | Planned |
+| **M5** | Vector Storage & Search | Append-only `.vec` segment files, WiscKey separation, SIMD flat cosine search | `m5-done` |
+| **M6** | Vector Indexing (HNSW) | Graph construction, efConstruction/efSearch, quantized re-ranking, cold open | In Progress |
+| **M7** | Metadata & Ingest Pipeline | Embedder interface, ONNX Runtime CLIP adapter, FFmpeg subprocess, moments | Planned |
+| **M8** | Query Layer & C ABI | Text/example search, filters, delete video, stats, stable C ABI | Planned |
+| **M9** | Python Client & v1.0 | pybind11 module, wheels for Linux/macOS/Windows, examples, v1.0 release | Planned |
 
 ---
 
@@ -121,7 +133,7 @@ cmake --build build --config Release
 ```
 
 ### 2. Run the Test Suite
-The unit and acceptance test suite includes 85 self-contained tests with zero external dependencies:
+The unit and acceptance test suite includes 101 self-contained tests with zero external dependencies:
 ```bash
 ./build/purpledb_tests
 ```
@@ -159,7 +171,8 @@ python -m src.golden_set_runner
 PurpleDB/
 ├── assets/                  # Logos and visual documentation assets
 ├── bench/                   # Storage engine benchmark harnesses
-│   ├── db_bench.cc          # High-throughput benchmark (fillseq, readrandom, fillrandom, readmissing)
+│   ├── db_bench.cc          # High-throughput KV benchmark (fillseq, readrandom, fillrandom, readmissing)
+│   ├── vec_bench.cc         # Vector benchmark (ingest, SIMD brute-force search, segment scan)
 │   └── results/             # Real measured benchmark outputs across milestones
 ├── core/
 │   ├── include/purpledb/    # Public C++ API headers
@@ -186,6 +199,11 @@ PurpleDB/
 │   │   ├── table_builder.cc/h # SSTable serializer with metaindex and footer
 │   │   ├── version_set.cc/h # MANIFEST replay, VersionEdit, and active file tracking
 │   │   └── wal_writer.cc/h  # 32 KiB block-framed Write-Ahead Log writer
+│   ├── vector/              # Vector engine internals (WiscKey Architecture)
+│   │   ├── delete_bitmap.cc/h # O(1) in-memory tombstone bitset
+│   │   ├── distance.cc/h    # SIMD AVX2/NEON dot product, cosine, and int8 quantization
+│   │   ├── vector_index.cc/h # Unified LSM KV metadata and vector store
+│   │   └── vector_segment.cc/h # Append-only .vec segment writer & reader
 │   └── util/                # Core utilities
 │       ├── arena.cc/h       # 4 KiB bump-pointer memory allocator
 │       ├── coding.cc/h      # Little-Endian Fixed32/64 and Varint32/64 encoders
@@ -198,7 +216,7 @@ PurpleDB/
 │   ├── DECISIONS.md         # Architectural Decision Records (ADRs) & benchmark logs
 │   └── LIMITATIONS.md       # Operational boundaries and concurrency constraints
 ├── prototype/               # Milestone M0 Python prototype
-└── tests/                   # Micro test suite (85 unit & acceptance tests)
+└── tests/                   # Micro test suite (101 unit & acceptance tests)
 ```
 
 ---

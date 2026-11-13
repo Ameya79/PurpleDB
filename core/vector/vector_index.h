@@ -105,3 +105,4 @@ class VectorIndex {
 };
 
 }  // namespace purpledb
+

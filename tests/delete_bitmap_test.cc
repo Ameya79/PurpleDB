@@ -94,3 +94,4 @@ TEST(DeleteBitmapTest, SerializationAndCorruption) {
 
 }  // namespace test
 }  // namespace purpledb
+
