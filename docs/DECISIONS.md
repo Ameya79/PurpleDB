@@ -49,3 +49,36 @@ This log documents all technical design decisions, trade-offs, and dependency ra
 - **Context**: The database requires low-overhead logging that is thread-safe and can be silenced or redirected in automated tests without polluting stderr.
 - **Decision**: Provide `PURPLE_LOG(level, format, ...)` guarded by an atomic level check before formatting, backed by a mutex-protected pluggable sink.
 - **Consequences**: In production, disabled log levels cost a single branch condition. In unit tests, logs can be redirected and verified programmatically.
+
+
+---
+
+### ADR-007: WAL Record Framing and Block Architecture
+- **Date**: 2026-11-13
+- **Context**: Unbounded streaming append logs suffer from torn writes when system crashes occur across hardware sector or page boundaries.
+- **Decision**: Adopt 32 KiB block framing with a 9-byte header (`[crc32c u32][length u32][type u8]`) supporting record fragmentation (`kFullType`, `kFirstType`, `kMiddleType`, `kLastType`).
+- **Consequences**: Block boundaries are predictable. Torn writes at the end of a log never corrupt previous blocks and can be detected and dropped cleanly.
+
+---
+
+### ADR-008: MemTable Backend for Milestone M2
+- **Date**: 2026-11-13
+- **Context**: The storage engine requires an in-memory mutable index.
+- **Decision**: Use `std::map<std::string, std::string, InternalKeyComparator>` for Milestone M2 per PRD specification.
+- **Consequences**: The interface remains identical when replacing the backend with an arena-backed SkipList in Milestone M3.
+
+---
+
+### ADR-009: Crash Recovery and Prefix Invariance Policy
+- **Date**: 2026-11-13
+- **Context**: Abrupt power loss or operating system crashes can leave partial records or un-flushed bytes at the tail of the WAL.
+- **Decision**: Recovery reads records sequentially until the first checksum mismatch, truncated record, or EOF. Any corrupted tail is dropped, and the valid committed prefix is retained.
+- **Consequences**: Verified by testing: truncating the WAL tail at any byte offset recovers a consistent prefix without holes.
+
+---
+
+### ADR-010: WriteBatch Multi-Operation Atomicity
+- **Date**: 2026-11-13
+- **Context**: Transactions often require updating multiple keys simultaneously (e.g. video moment index + metadata + job status).
+- **Decision**: Mutex-protected WAL appends write the entire `WriteBatch` payload as a single logical record before applying it to the MemTable.
+- **Consequences**: Eliminates partial batch application across crashes.

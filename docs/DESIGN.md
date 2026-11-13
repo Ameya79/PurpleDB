@@ -334,3 +334,55 @@ When the program starts, the C++ runtime initializes all global and file-scope s
 6. **Bounds-Checked Binary Parsing**: How to prevent buffer overflow vulnerabilities by passing pointer and limit boundaries (`p` and `limit`) to all binary decoders.
 7. **Static Registration in Test Frameworks**: How global static initializers register test cases before `main()` without requiring manual test lists.
 8. **Sanitizers (ASan & UBSan)**: How compiler instrumentation detects memory leaks, out-of-bounds array accesses, and undefined behavior at test runtime.
+
+
+---
+
+# Milestone M2: Minimal Durable KV & WAL Mechanics
+
+## 1. Write-Ahead Logging (WAL) & Durability
+In memory-first storage engines (like LSM trees), updating memory directly is fast but dangerous: a power loss or crash destroys all volatile state.
+- **WAL Invariant**: Before any key-value mutation is applied to the in-memory MemTable, it is first serialized and appended to an append-only disk log (the WAL).
+- **Sequential Disk Writes**: Disk drives and NVMe SSDs excel at sequential appends (GB/s bandwidth) compared to random updates. WAL appends give disk durability with near-memory write latency.
+
+## 2. 32 KiB Block Framing & Torn Write Isolation
+Operating systems and physical drives write data in pages or sectors (typically 4 KiB).
+- When a crash occurs in the middle of writing a 16 KiB record, the drive might complete the first 4 KiB and fail the rest (a **torn write**).
+- By grouping the WAL into fixed 32 KiB blocks with individual record headers and checksums, PurpleDB detects exactly which fragment was partially written.
+- If fewer than 9 bytes remain in a block, the rest of the block is padded with zeroes (`kZeroType`), ensuring headers never straddle block boundaries without a fragment type flag.
+
+## 3. Atomic WriteBatch & Serialization
+A database transaction often updates multiple records (e.g. video moment index entry + thumbnail metadata + ingestion job checkpoint).
+- If the system crashed after writing record 1 of 3, the database state would be internally inconsistent.
+- `WriteBatch` serializes all operations into a single contiguous byte buffer with a starting sequence number and an operation count.
+- The entire batch is written to the WAL as a **single logical record**. If the record is incomplete on disk, recovery rejects the whole record, preserving atomicity.
+
+## 4. MVCC Internal Keys & Descending Sequence Ordering
+PurpleDB uses Multi-Version Concurrency Control (MVCC):
+- An internal key is formed by packing the user key and an 8-byte tag:
+  $$\text{Tag} = (\text{SequenceNumber} \ll 8) \mid \text{ValueType}$$
+- When comparing two internal keys with the same user key, sequence numbers are sorted **in descending order** ($100 > 99 > \dots > 1$).
+- **Why descending?** When searching for user key `"profile"` at snapshot sequence 50, a binary search (`lower_bound`) targeting `("profile", 50)` immediately lands on the newest visible version at or before sequence 50, without scanning past older historical versions.
+
+## 5. Tombstone Deletions in Append-Only Storage
+In an append-only storage engine, deleting a key cannot seek to arbitrary disk locations to erase old bytes.
+- Instead, `Delete(key)` writes a **tombstone** record (`kTypeDeletion`).
+- In the MemTable, the tombstone has a newer sequence number than any previous `Put`. Lookups find the tombstone and return `NotFound`.
+- Obsolete values and tombstones are only physically discarded during SSTable compaction (Milestone M4) once no older snapshots can reference them.
+
+## 6. Crash Recovery & Tail Prefix Invariance
+- On database restart, `DBImpl::Recover()` opens the active WAL file and sequentially verifies each record fragment's CRC-32C.
+- If power failed while appending a record, the tail will contain partial bytes or a checksum mismatch.
+- **Recovery Rule**: Read until the first corrupted record, safely ignore the tail, and rebuild the MemTable from the valid committed prefix.
+
+---
+
+## What You Should Understand Now (Milestone M2 Concepts)
+1. **Write-Ahead Logging (WAL)**: Why database engines write mutations to an append-only sequential log before touching in-memory data structures.
+2. **Block Fragmenting (32 KiB Framing)**: How segmenting records across fixed-size blocks isolates torn writes and allows recovery to detect damaged disk sectors.
+3. **Atomic Multi-Key Batches (`WriteBatch`)**: How packing multiple operations into a single contiguous WAL record prevents partial updates during crashes.
+4. **Internal Key Layout & Descending Sequence Order**: Why internal keys sort user keys ascending but sequence numbers descending, and how this accelerates `lower_bound` lookups.
+5. **Tombstone Deletions**: Why append-only databases treat deletions as mutations rather than in-place erasures.
+6. **Sync Policies (`fsync` vs. Page Cache)**: The performance and durability trade-offs between OS-buffered appends and hardware disk syncs (`_commit` / `fsync`).
+7. **Consistent Prefix Recovery**: How the WAL reader guarantees that truncating a log file at any arbitrary byte offset always restores a consistent database state.
+8. **Pluggable Filesystem Abstraction (`Env`)**: Why isolating OS file and directory operations behind abstract interfaces simplifies testing and ensures cross-platform reliability.

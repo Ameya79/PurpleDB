@@ -68,3 +68,76 @@ PurpleDB `Status` instances encode status state in a compact binary buffer:
   - `5`: kIOError
   - `6`: kBusy
   - `7`: kTimedOut
+
+
+---
+
+## 2. Write-Ahead Log (WAL) Format (Format Version 1)
+
+### 2.1 Block Architecture
+The Write-Ahead Log is divided into contiguous 32 KiB ($32,768$ byte) blocks. Records never cross block boundaries without fragmentation.
+```
++-------------------------------------------------------------+
+|                          WAL File                           |
++-----------------------------+-------------------------------+
+|     Block 0 (32,768 B)      |      Block 1 (32,768 B)       |
++-----------------------------+-------------------------------+
+```
+
+### 2.2 Record Header Layout
+Every physical record fragment in a WAL block begins with a 9-byte header:
+```
++-------------------+---------------------+------------------+-----------------------+
+|  crc32c (4 Bytes) |  Length (4 Bytes)   |  Type (1 Byte)   |  Payload (Length B)   |
+|  Fixed32, Masked  |  Fixed32 (uint32)   |  RecordType uint8|  Binary slice bytes   |
++-------------------+---------------------+------------------+-----------------------+
+```
+
+### 2.3 Record Types
+- `kZeroType = 0`: Reserved for block trailer padding. When remaining block space is $< 9$ bytes, the trailer is padded with zero bytes and a new block begins.
+- `kFullType = 1`: The entire logical record is contained within this single block.
+- `kFirstType = 2`: The first fragment of a record that spans multiple blocks.
+- `kMiddleType = 3`: An intermediate fragment of a multi-block record.
+- `kLastType = 4`: The final terminating fragment of a multi-block record.
+
+### 2.4 Integrity & Masked Checksums
+The checksum stored in bytes $0 \dots 3$ of the header covers the 1-byte `Type` field followed by the `Payload` bytes. It is masked via:
+$$\text{Masked}(C) = ((C \gg 15) \mid (C \ll 17)) + \text{0xa282ead8}$$
+During recovery, readers verify the checksum of each fragment. If a torn write, bit flip, or truncated record occurs at the end of the log, the reader halts and safely drops the uncommitted tail.
+
+---
+
+## 3. WriteBatch Binary Layout (Format Version 1)
+
+A `WriteBatch` encodes an atomic collection of puts and deletes into a contiguous binary representation:
+
+```
++-----------------------------+-----------------------+-----------------------------+
+|  SequenceNumber (8 Bytes)   |    Count (4 Bytes)    |     Entries (Variable)      |
+|  Fixed64 (Starting Seq)     |    Fixed32 (uint32)   |     Sequence of mutations   |
++-----------------------------+-----------------------+-----------------------------+
+```
+
+### 3.1 Entry Types
+- **Put Entry** (`kTypeValue = 0x1`):
+  `[0x1][Key Length (Varint32)][Key Bytes][Value Length (Varint32)][Value Bytes]`
+- **Delete Entry** (`kTypeDeletion = 0x0`):
+  `[0x0][Key Length (Varint32)][Key Bytes]`
+
+---
+
+## 4. MemTable Internal Key Encoding (Format Version 1)
+
+Every user key in the MemTable is wrapped into an `InternalKey`:
+```
++------------------------------------+------------------------------------+
+|         User Key Bytes             |          Tag (8 Bytes)             |
+|         Arbitrary user bytes       |          Fixed64                   |
++------------------------------------+------------------------------------+
+```
+- **Tag Formulation**:
+  $$\text{Tag} = (\text{SequenceNumber} \ll 8) \mid \text{ValueType}$$
+- **Sorting Invariant**:
+  1. `User Key` ascending (lexicographical bytewise order).
+  2. `SequenceNumber` **descending** (higher sequence numbers appear first).
+  This allows `lower_bound` lookups to immediately position on the newest version $\le$ the query sequence number.
