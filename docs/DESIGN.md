@@ -694,6 +694,82 @@ Video codecs (`libavcodec`/`libavformat`) contain complex C bitstream parsers vu
 6. **Centroid vs Medoid Selection**: The difference between an average geometric vector (centroid) and the most representative actual physical observation (medoid) for thumbnail generation.
 7. **Two-Phase Multimodal Retrieval**: How text queries and image frames projected into a shared cosine hypersphere enable instant cross-modal search without intermediate text tagging.
 
+---
+
+# PurpleDB Architecture & Design Rationale — Milestone M8 (Query Layer & Stable C ABI)
+
+Milestone M8 delivers the public query engine and the stable C ABI, completing the end-to-end database interface upon which Python, Node.js, Go, and Rust bindings are built.
+
+## 1. Multimodal Query Execution Path & Over-Fetch
+A multimodal database must search through visual and textual queries seamlessly while respecting complex metadata filters (e.g. video_id predicates and temporal intervals).
+```
+ [User Query: "dog jumping in lake"]
+                 |
+                 v
+     +-----------------------+
+     | Local/API Embedder    | -> Projects text to 512-dim unit vector
+     +-----------+-----------+
+                 |
+                 v
+     +-----------------------+
+     | HNSW Proximity Search | -> Over-fetches candidate VectorIds (k * overfetch)
+     +-----------+-----------+
+                 |
+                 v
+     +-----------------------+
+     | Snapshot Hydration    | -> Point-in-time ReadOptions(snap) from LSM
+     | (info:<vid>:<moment>) | -> Discards tombstones, checks temporal & video filters
+     +-----------+-----------+
+                 |
+                 v
+     +-----------------------+
+     | Score Rank & Sort     | -> Returns Top-K MomentHit results
+     +-----------------------+
+```
+
+## 2. Snapshot-Isolated Candidate Hydration (ADR-032)
+Nearest neighbor search on an HNSW graph is a geometric operation that returns candidate vector IDs. In a live system, concurrent ingestion or video deletion may mutate metadata concurrently.
+- **Snapshot Freezing**: The `QueryEngine` acquires a point-in-time `Snapshot` handle before querying the index.
+- **Consistent Hydration**: When candidates are looked up in the LSM store (`info:<video_id>:m_<moment_id>`), the lookup uses `ReadOptions(snapshot)`. This guarantees that readers never observe partially written metadata records, corrupt uncommitted moments, or resurrected keys.
+- **Snapshot Release**: When candidate filtering completes, the snapshot is released back to the database.
+
+## 3. Video Deletion Cascading & O(1) Tombstones (ADR-033)
+Deleting a video requires eliminating all associated moment records, vector embeddings, and job state without costly synchronous graph re-indexing:
+- **Prefix Scan**: The deletion engine seeks prefix `'m' + video_id + ":"`.
+- **$O(1)$ Vector Tombstoning**: For every moment key found, its 64-bit `VectorId` is marked deleted in the `DeleteBitmap` in $O(1)$ time. Subsequent vector queries filter out this node instantly without visiting disk.
+- **Atomic LSM Batch**: A single `WriteBatch` drops the `'m'` moment key, the `'v'` reverse mapping key, the `"info:"` metadata descriptor, and the `'j'` job state record.
+- **Background Vacuuming**: If the fraction of deleted nodes exceeds 20% (`DeletedFraction() > 0.20`), a background vacuum (`RebuildIndex()`) rebuilds the physical graph topology.
+
+## 4. Concurrency Model: Readers During Active Ingestion (ADR-035)
+Ingesting long video streams requires seconds or minutes of frame decoding and embedding. A database cannot block read queries during this process.
+- **Shared Mutex Synchronization**: `QueryEngine` protects index mutations and query traversals using `std::shared_mutex`.
+- **Concurrent Readers**: `SearchText` and `SearchByExample` acquire a `std::shared_lock<std::shared_mutex>`, permitting multiple reader threads to search concurrently with zero lock contention.
+- **Exclusive Batch Writers**: `AddVideo` and `AddFrames` acquire a `std::unique_lock<std::shared_mutex>` during batch commit to ensure atomic mutation of graph structures and LSM memory tables.
+- **ThreadSanitizer (TSan) Validation**: This synchronization model is verified race-free under ThreadSanitizer.
+
+## 5. Stable C ABI Boundary & FFI Architecture (ADR-034)
+Exposing C++ classes directly across dynamic shared libraries creates ABI fragility:
+- C++ compilers use different name-mangling schemes.
+- Different standard library implementations (`libstdc++`, `libc++`, MSVC STL) have conflicting memory layouts for `std::string` and `std::vector`.
+- Cross-language bindings (Python `ctypes`/`cffi`, Node.js `napi`, Rust `bindgen`) cannot easily bind to C++ classes.
+- **Pure C99 ABI Solution**: `purpledb_c.h` exports pure C functions with `extern "C"`, opaque pointers (`pdb_t*`, `pdb_results_t*`), and explicit integer return codes (`PDB_OK`, `PDB_ERROR`, `PDB_NOT_FOUND`).
+- **ABI Versioning**: `pdb_abi_version()` exports integer `1`. If the binary interface ever changes, client runtimes detect version mismatches at load time before undefined behavior occurs.
+
+## 6. Exception Shielding & Thread-Local Error Handling
+- **Zero Exception Invariant**: C++ exceptions thrown across shared library boundaries into foreign runtimes (like Python or C) cause immediate abnormal process aborts (`std::terminate`). Every C ABI function is enclosed in a `try ... catch (...)` boundary.
+- **Thread-Local Storage (TLS)**: When an internal operation fails, the error message is recorded in a thread-local string (`tls_last_error`). The caller retrieves the error string via `pdb_last_error()`. This ensures thread-safety without allocating dynamic memory on the caller's stack.
+
+---
+
+## What You Should Understand Now (Milestone M8 Concepts)
+1. **The C ABI as a Universal Contract**: Why foreign function interfaces (FFI) depend exclusively on pure C ABIs with opaque pointer handles, and why raw C++ STL classes cannot safely cross shared library boundaries.
+2. **Exception Shields**: Why all C++ exceptions must be trapped and translated into integer return codes at the boundary of a native library to prevent process crashes in foreign runtimes.
+3. **Thread-Local Storage (TLS) for Error Propagation**: How TLS buffers allow re-entrant, thread-safe error reporting without requiring the caller to pass pre-allocated error buffers into every function.
+4. **Snapshot Isolation Across Hybrid Systems**: Why coordinating LSM snapshot handles with vector index candidate over-fetch guarantees ACID point-in-time consistency across both vector and scalar data.
+5. **Cascading Deletes with Constant-Time Tombstones**: How combining in-memory bitset tombstones ($O(1)$) with atomic LSM WriteBatches provides instantaneous deletion of multimedia entities without blocking search queries.
+6. **Reader-Writer Locks for Pipeline Concurrency**: How `std::shared_mutex` allows unbounded concurrent search queries to run in parallel while video ingestion batches commit atomically.
+7. **Cross-Modal Retrieval Invariance**: How text queries and image examples execute through the identical underlying nearest-neighbor search pipeline once projected onto the unit embedding hypersphere.
+
 
 
 
