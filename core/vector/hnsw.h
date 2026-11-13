@@ -81,6 +81,11 @@ class HNSW {
   // Reconstruct graph from a binary snapshot file with CRC verification
   Status LoadSnapshot(Env* env, const std::string& snapshot_path);
 
+  // Set base vector storage for distance computation (e.g. after LoadSnapshot)
+  void SetVectors(const std::vector<float>& vectors) {
+    flat_vectors_ = vectors;
+  }
+
   // Replay tail vector inserts appended after the snapshot was saved
   Status ReplayTail(uint64_t from_id, const std::vector<float>& tail_vectors, size_t dim);
 
