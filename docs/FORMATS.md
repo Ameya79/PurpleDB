@@ -480,6 +480,45 @@ Every `.hnsw` file concludes with a 4-byte masked Castagnoli CRC-32C checksum ve
 ```
 On cold open, `HNSW::LoadSnapshot()` verifies both the header checksum and the footer checksum. If either fails or if a torn write is detected, the database gracefully drops the snapshot and rebuilds the graph from the append-only `.vec` segments.
 
+---
+
+## 11. Ingest Job State Format (Format Version 1)
+
+PurpleDB tracks resumable video ingestion progress inside the LSM store to ensure crash resilience without duplicate moment or vector insertion.
+
+### 11.1 Key Pattern
+Ingest job state is stored with keyspace prefix `'j'` (`0x6a`):
+```
++------------+-------------------------------+
+| Prefix (1B)| Video ID (Content SHA-256)   |
+| 'j' (0x6a) | e.g. "a1b2c3d4..."            |
++------------+-------------------------------+
+```
+
+### 11.2 Value Payload Layout (Fixed 43 Bytes + Payload)
+```
++-----------------------------------+-----------------------------------+
+| Format Version (2 Bytes, Fixed16) | Job Status (1 Byte, uint8)        |
+| Value = 1                         | 0=Pending, 1=Running, 2=Done, 3=Err|
++-----------------------------------+-----------------------------------+
+| Last Committed PTS (8 Bytes, u64) | Microseconds / timestamp offset   |
++-----------------------------------+-----------------------------------+
+| Moments Count (4 Bytes, Fixed32)  | Total moments committed so far    |
++-----------------------------------+-----------------------------------+
+| Frames Processed (4 Bytes, Fixed32)| Total frames extracted & embedded |
++-----------------------------------+-----------------------------------+
+| Total Duration PTS (8 Bytes, u64) | Total video duration in PTS units |
++-----------------------------------+-----------------------------------+
+| Reserved / Padding (12 Bytes)     | Zero-initialized                  |
++-----------------------------------+-----------------------------------+
+| Masked CRC-32C (4 Bytes, Fixed32) | Checksum over bytes 0..38         |
++-----------------------------------+-----------------------------------+
+```
+
+- **Crash Invariance**: Each ingest batch atomically writes moment metadata, vector index entries, and the updated `j|<video_id>` job record in a single `WriteBatch`.
+- **Resumption Semantics**: Upon crash recovery, `Resume()` reads `j|<video_id>`, skips all frames with `timestamp <= last_committed_pts`, and continues ingest without generating duplicate vector IDs or LSM moment keys.
+
+
 
 
 
