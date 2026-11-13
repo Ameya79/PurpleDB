@@ -348,6 +348,53 @@ Executed on local workstation:
   - For each detected moment, compute the L2-normalized centroid embedding and select the medoid frame (the frame with highest cosine similarity to the centroid) as the moment's canonical thumbnail.
 - **Consequences**: Robust process safety, content-addressed video identification, and semantically representative thumbnails for search results.
 
+---
+
+### ADR-032: Unified Query Engine & Candidate Over-Fetch with Snapshot Visibility
+- **Date**: 2026-11-13
+- **Context**: Multimodal search must combine vector similarity, temporal interval filters, and video_id predicates. Evaluating filters after vector search on an inconsistent database snapshot can return partially committed or deleted records.
+- **Decision**:
+  - The `QueryEngine` executes cross-modal queries (text or image) by projecting the query into unit vector space with the verified embedder.
+  - Requests $k \times \text{overfetch}$ candidates from the HNSW proximity graph.
+  - Fetches moment metadata from the LSM tree under a consistent point-in-time `Snapshot` handle, filtering out tombstoned vectors and non-matching metadata.
+- **Consequences**: Clean separation of geometric search and metadata filtering with strict ACID read isolation.
+
+---
+
+### ADR-033: Video Deletion & O(1) Tombstone Cascading
+- **Date**: 2026-11-13
+- **Context**: Deleting a video requires removing all associated moment records, vector embeddings, and job state without costly synchronous graph reorganizations.
+- **Decision**:
+  - When `DeleteVideo(video_id)` is invoked, scan the LSM moment prefix (`m|<video_id>:`).
+  - For each moment, extract its `VectorId` and mark it deleted in the `DeleteBitmap` in $O(1)$ time.
+  - Batch delete all moment records and job state in a single atomic `WriteBatch`.
+  - When the deleted fraction exceeds 20%, background rebuild cleans up the physical graph.
+- **Consequences**: Video deletion is immediate and sub-millisecond, leaving durable markers that prevent resurrection bugs.
+
+---
+
+### ADR-034: Stable C ABI Boundary
+- **Date**: 2026-11-13
+- **Context**: Language bindings (Python, Node.js, Go, Rust) require a stable Foreign Function Interface (FFI). Exposing raw C++ classes or standard library templates across shared library boundaries leads to compiler ABI incompatibilities, name mangling discrepancies, and memory allocator mismatches.
+- **Decision**:
+  - Define a pure C99 API header (`purpledb_c.h`) using opaque handles (`pdb_t*`, `pdb_results_t*`).
+  - No C++ exceptions or STL containers cross the boundary.
+  - Explicit integer return codes (`PDB_OK`, `PDB_ERROR`, `PDB_NOT_FOUND`) with thread-local `pdb_last_error()`.
+  - Export `int pdb_abi_version(void)` returning `1`.
+- **Consequences**: Binary compatibility across compilers and easy binding generation for dynamic languages.
+
+---
+
+### ADR-035: Thread-Safe Read-Write Concurrency During Ingestion
+- **Date**: 2026-11-13
+- **Context**: Ingesting long videos takes seconds or minutes. Video databases must allow concurrent search queries while video frames are actively decoded and inserted in the background without deadlocks or race conditions.
+- **Decision**:
+  - In `QueryEngine`, protect shared index mutations and search with a reader-writer lock or mutex synchronization around `VectorIndex::Put` and `Search`.
+  - Readers acquire shared read locks during search, while the ingest worker acquires a unique write lock during batch commit.
+  - Validate concurrency under ThreadSanitizer (TSan).
+- **Consequences**: Concurrent search queries execute in parallel with zero data races.
+
+
 
 
 
