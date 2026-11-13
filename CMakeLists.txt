@@ -54,6 +54,8 @@ set(PURPLEDB_CORE_SOURCES
   core/storage/db_impl.cc
   core/storage/env.cc
   core/storage/filename.cc
+  core/storage/filter_block.cc
+  core/storage/filter_policy.cc
   core/storage/format.cc
   core/storage/memtable.cc
   core/storage/table.cc
@@ -65,6 +67,7 @@ set(PURPLEDB_CORE_SOURCES
   core/storage/write_batch.cc
   core/util/arena.cc
   core/util/coding.cc
+  core/util/hash.cc
   core/util/iterator.cc
   core/util/logging.cc
   core/util/slice.cc
@@ -95,6 +98,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/block_test.cc
   tests/table_test.cc
   tests/cache_test.cc
+  tests/filter_test.cc
   tests/version_set_test.cc
   tests/env_test.cc
   tests/wal_test.cc
