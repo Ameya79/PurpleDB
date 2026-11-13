@@ -124,18 +124,30 @@ Status DBImpl::Recover() {
     sf.reset();
   }
 
-  // Roll to a fresh WAL log for subsequent mutations
-  uint64_t new_log = versions_->NewFileNumber();
-  VersionEdit edit;
-  edit.SetLogNumber(new_log);
-  s = versions_->LogAndApply(&edit);
-  if (!s.ok()) return s;
+  versions_->SetLastSequence(last_sequence_);
 
-  s = env_->NewWritableFile(LogFileName(dbname_, new_log), &log_file_);
+  // If memtable has recovered entries from WAL, flush them to L0 SSTable
+  if (mem_->Count() > 0) {
+    uint64_t new_log = versions_->NewFileNumber();
+    s = FlushMemTableToOutputFile(mem_.get(), new_log);
+    if (!s.ok()) return s;
+    mem_ = std::make_unique<MemTable>();
+    env_->DeleteFile(log_name);
+    log_number_ = new_log;
+  } else {
+    // Roll to a fresh WAL log for subsequent mutations
+    uint64_t new_log = versions_->NewFileNumber();
+    VersionEdit edit;
+    edit.SetLogNumber(new_log);
+    s = versions_->LogAndApply(&edit);
+    if (!s.ok()) return s;
+    log_number_ = new_log;
+  }
+
+  s = env_->NewWritableFile(LogFileName(dbname_, log_number_), &log_file_);
   if (!s.ok()) return s;
 
   log_ = std::make_unique<wal::WalWriter>(log_file_.get());
-  log_number_ = new_log;
   versions_->SetLastSequence(last_sequence_);
 
   return Status::OK();

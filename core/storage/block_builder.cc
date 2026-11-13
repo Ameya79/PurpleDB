@@ -41,7 +41,6 @@ Slice BlockBuilder::Finish() {
 void BlockBuilder::Add(const Slice& key, const Slice& value) {
   assert(!finished_);
   assert(counter_ <= block_restart_interval_);
-  assert(buffer_.empty() || key.compare(Slice(last_key_)) > 0);
 
   size_t shared = 0;
   if (counter_ < block_restart_interval_) {

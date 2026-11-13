@@ -69,3 +69,4 @@ Status SetCurrentFile(Env* env, const std::string& dbname, uint64_t manifest_num
 }
 
 }  // namespace purpledb
+

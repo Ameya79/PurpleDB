@@ -51,3 +51,4 @@ class BlockBuilder {
 };
 
 }  // namespace purpledb
+

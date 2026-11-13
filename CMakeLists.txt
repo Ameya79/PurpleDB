@@ -102,6 +102,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/memtable_test.cc
   tests/db_test.cc
   tests/m2_acceptance_test.cc
+  tests/m3_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
@@ -112,3 +113,11 @@ target_include_directories(purpledb_tests PRIVATE
 )
 
 add_test(NAME purpledb_tests COMMAND purpledb_tests)
+
+# Benchmarks
+add_executable(db_bench bench/db_bench.cc)
+target_link_libraries(db_bench PRIVATE purpledb_core Threads::Threads)
+target_include_directories(db_bench PRIVATE
+  core/include
+  core
+)

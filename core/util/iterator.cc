@@ -33,3 +33,4 @@ std::unique_ptr<Iterator> NewErrorIterator(const Status& status) {
 }
 
 }  // namespace purpledb
+

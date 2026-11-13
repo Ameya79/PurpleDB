@@ -86,3 +86,4 @@ TEST(VersionSetTest, ManifestLogAndRecover) {
 }
 
 }  // namespace purpledb
+

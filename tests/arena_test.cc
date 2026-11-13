@@ -59,3 +59,4 @@ TEST(ArenaTest, LargeAllocations) {
 }
 
 }  // namespace purpledb
+

@@ -46,3 +46,4 @@ class Block {
 };
 
 }  // namespace purpledb
+

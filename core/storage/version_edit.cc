@@ -153,3 +153,4 @@ Status VersionEdit::DecodeFrom(const Slice& src) {
 }
 
 }  // namespace purpledb
+

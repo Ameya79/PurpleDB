@@ -59,3 +59,4 @@ inline char* Arena::Allocate(size_t bytes) {
 }
 
 }  // namespace purpledb
+

@@ -78,3 +78,4 @@ enum CompressionType {
 };
 
 }  // namespace purpledb
+

@@ -53,3 +53,4 @@ Status Footer::DecodeFrom(Slice* input) {
 }
 
 }  // namespace purpledb
+

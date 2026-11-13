@@ -389,3 +389,4 @@ std::shared_ptr<Cache> NewLRUCache(size_t capacity) {
 }
 
 }  // namespace purpledb
+

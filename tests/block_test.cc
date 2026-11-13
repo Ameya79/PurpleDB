@@ -117,3 +117,4 @@ TEST(BlockTest, CorruptionSafety) {
 }
 
 }  // namespace purpledb
+

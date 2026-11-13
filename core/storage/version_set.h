@@ -108,7 +108,7 @@ class VersionSet {
 
   std::string dbname_;
   Env* env_;
-  uint64_t next_file_number_{2};
+  uint64_t next_file_number_{1};
   uint64_t manifest_file_number_{0};
   uint64_t last_sequence_{0};
   uint64_t log_number_{0};

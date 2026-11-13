@@ -202,9 +202,19 @@ Status VersionSet::LogAndApply(VersionEdit* edit) {
     assert(descriptor_file_ == nullptr);
     new_manifest_file = ManifestFileName(dbname_, manifest_file_number_);
     edit->SetNextFileNumber(next_file_number_);
-    s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
-    if (s.ok()) {
-      descriptor_log_ = std::make_unique<wal::WalWriter>(descriptor_file_.get());
+
+    if (env_->FileExists(new_manifest_file)) {
+      uint64_t manifest_size = 0;
+      env_->GetFileSize(new_manifest_file, &manifest_size);
+      s = env_->NewAppendableFile(new_manifest_file, &descriptor_file_);
+      if (s.ok()) {
+        descriptor_log_ = std::make_unique<wal::WalWriter>(descriptor_file_.get(), manifest_size);
+      }
+    } else {
+      s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
+      if (s.ok()) {
+        descriptor_log_ = std::make_unique<wal::WalWriter>(descriptor_file_.get());
+      }
     }
   }
 

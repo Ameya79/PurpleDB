@@ -1,0 +1,10 @@
+=================================================
+       PurpleDB Storage Engine Benchmark (M3)    
+=================================================
+Keys: 20000 | Value Size: 100 bytes
+Write Buffer Size: 4 MiB | Block Size: 4 KiB
+-------------------------------------------------
+fillseq    :    68024.7 ops/sec |   7.53 MB/sec (0.294 s)
+readrandom :   476652.4 ops/sec |  52.73 MB/sec (found 20000/20000)
+fillrandom :    58190.1 ops/sec |   6.44 MB/sec (0.344 s)
+=================================================

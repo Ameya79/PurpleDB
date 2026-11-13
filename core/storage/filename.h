@@ -17,3 +17,4 @@ std::string TempFileName(const std::string& dbname, uint64_t number);
 Status SetCurrentFile(Env* env, const std::string& dbname, uint64_t manifest_number);
 
 }  // namespace purpledb
+

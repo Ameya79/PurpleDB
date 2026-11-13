@@ -111,3 +111,4 @@ class VersionEdit {
 };
 
 }  // namespace purpledb
+
