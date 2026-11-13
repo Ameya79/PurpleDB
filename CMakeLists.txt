@@ -195,6 +195,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/query_engine_test.cc
   tests/c_abi_test.cc
   tests/m8_acceptance_test.cc
+  tests/m9_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
@@ -222,3 +223,27 @@ target_include_directories(vec_bench PRIVATE
   core/include
   core
 )
+
+# Python Bindings (Milestone M9)
+option(BUILD_PYTHON "Build Python bindings via pybind11" OFF)
+if(BUILD_PYTHON)
+  find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -m pybind11 --cmakedir
+    OUTPUT_VARIABLE pybind11_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  list(APPEND CMAKE_PREFIX_PATH "${pybind11_DIR}")
+  find_package(pybind11 CONFIG QUIET)
+  if(NOT pybind11_FOUND)
+    find_package(pybind11 REQUIRED)
+  endif()
+
+  pybind11_add_module(_purpledb bindings/python/purpledb_py.cc)
+  target_link_libraries(_purpledb PRIVATE purpledb_core Threads::Threads)
+  target_include_directories(_purpledb PRIVATE include core/include core .)
+  if(WIN32 AND MINGW)
+    target_link_options(_purpledb PRIVATE -static-libgcc -static-libstdc++)
+  endif()
+endif()
+

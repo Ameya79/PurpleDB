@@ -1,0 +1,79 @@
+import os
+import sys
+import shutil
+import subprocess
+from pathlib import Path
+from setuptools import setup, find_packages, Extension
+from setuptools.command.build_ext import build_ext
+
+
+class CMakeExtension(Extension):
+    def __init__(self, name: str, sourcedir: str = ""):
+        super().__init__(name, sources=[])
+        self.sourcedir = os.path.abspath(sourcedir)
+
+
+class CMakeBuild(build_ext):
+    def build_extension(self, ext: Extension) -> None:
+        if not isinstance(ext, CMakeExtension):
+            super().build_extension(ext)
+            return
+
+        dest_file = Path(self.get_ext_fullpath(ext.name))
+        dest_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Check if pre-built binary already exists in bindings/python/purpledb
+        source_pkg = Path(ext.sourcedir) / "bindings" / "python" / "purpledb"
+        prebuilt_pyd = list(source_pkg.glob("_purpledb*.pyd")) + list(source_pkg.glob("_purpledb*.so"))
+        if prebuilt_pyd and not os.environ.get("FORCE_REBUILD"):
+            shutil.copy2(prebuilt_pyd[0], dest_file)
+            # Copy runtime dlls if present
+            for dll in source_pkg.glob("*.dll"):
+                shutil.copy2(dll, dest_file.parent / dll.name)
+            return
+
+        cfg = "Debug" if self.debug else "Release"
+        build_dir = Path(self.build_temp)
+        build_dir.mkdir(parents=True, exist_ok=True)
+
+        cmake_args = [
+            f"-DCMAKE_BUILD_TYPE={cfg}",
+            f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={dest_file.parent}",
+            f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY={dest_file.parent}",
+            f"-DPython3_EXECUTABLE={sys.executable}",
+            "-DBUILD_PYTHON=ON",
+        ]
+
+        build_args = ["--config", cfg]
+
+        subprocess.check_call(["cmake", ext.sourcedir] + cmake_args, cwd=build_dir)
+        subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=build_dir)
+
+
+setup(
+    name="purpledb",
+    version="1.0.0",
+    author="PurpleDB Contributors",
+    description="Embedded multimodal database for semantic video and image search",
+    long_description=open("README.md", "r", encoding="utf-8").read(),
+    long_description_content_type="text/markdown",
+    url="https://github.com/Ameya79/PurpleDB",
+    package_dir={"": "bindings/python"},
+    packages=["purpledb"],
+    package_data={
+        "purpledb": ["*.pyi", "py.typed", "*.pyd", "*.so", "*.dll"],
+    },
+    include_package_data=True,
+    ext_modules=[CMakeExtension("purpledb._purpledb")],
+    cmdclass={"build_ext": CMakeBuild},
+    python_requires=">=3.8",
+    classifiers=[
+        "Development Status :: 5 - Production/Stable",
+        "Intended Audience :: Developers",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: C++",
+        "Topic :: Database",
+        "Topic :: Multimedia :: Video",
+    ],
+    zip_safe=False,
+)
