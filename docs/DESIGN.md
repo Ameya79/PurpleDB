@@ -386,3 +386,87 @@ In an append-only storage engine, deleting a key cannot seek to arbitrary disk l
 6. **Sync Policies (`fsync` vs. Page Cache)**: The performance and durability trade-offs between OS-buffered appends and hardware disk syncs (`_commit` / `fsync`).
 7. **Consistent Prefix Recovery**: How the WAL reader guarantees that truncating a log file at any arbitrary byte offset always restores a consistent database state.
 8. **Pluggable Filesystem Abstraction (`Env`)**: Why isolating OS file and directory operations behind abstract interfaces simplifies testing and ensures cross-platform reliability.
+
+---
+
+# Milestone M3: SSTables, SkipList MemTable, Block Cache, and Background Flush
+
+## 1. Bump-Pointer Arena Allocation
+General-purpose memory allocators (`malloc`, `operator new`) incur metadata overhead (8 to 16 bytes per allocation) and suffer from thread contention and heap fragmentation when handling hundreds of thousands of tiny node allocations.
+- **Arena Design**: An `Arena` pre-allocates large memory blocks (4 KiB each). Allocations advance a simple bump pointer:
+  ```cpp
+  char* result = alloc_ptr_;
+  alloc_ptr_ += bytes;
+  return result;
+  ```
+- **Alignment**: Hardware architectures require aligned memory access (e.g. 8-byte alignment for 64-bit pointers). The Arena rounds allocations up to 8-byte boundaries using `(bytes + 7) & ~7`.
+- **$O(1)$ Teardown**: Individual nodes in the MemTable never need individual `free()` or `delete` calls. When a MemTable is flushed to an SSTable, destroying the `Arena` frees all blocks in a single loop over its vector of buffers.
+
+## 2. Lock-Free Reader SkipList
+Balanced trees (like red-black trees in `std::map`) require complex node rotations during insertion, necessitating global locks that stall concurrent readers.
+- **SkipList Structure**: A SkipList consists of probabilistic linked lists arranged in vertical levels ($0 \dots \text{MaxHeight}-1$). Level 0 links every node; higher levels skip intermediate nodes with probability $p = \frac{1}{4}$.
+- **Lock-Free Concurrency**:
+  - Node forward pointers are stored as `std::atomic<Node*>`.
+  - Writers update pointers using `release` memory order; readers traverse using `acquire` memory order.
+  - Readers can search and iterate concurrently with a single writer without taking any mutex locks.
+
+## 3. Prefix Delta Compression and Restart Points
+Keys in sorted SSTables frequently share substantial prefixes (e.g. `video_001_moment_0001`, `video_001_moment_0002`).
+- **Delta Encoding**: Each entry stores:
+  - `shared_bytes`: Number of leading bytes identical to the previous key.
+  - `unshared_bytes`: Number of remaining bytes unique to this key.
+  - `value_length`: Byte length of the value.
+  - `key_delta` + `value`: Raw payload.
+  This compresses key storage by 50% to 70%.
+- **Restart Points**: Pure delta encoding would force a reader to decode every entry from the beginning of a block to find a key. To preserve fast random lookups:
+  - Every 16 keys (`block_restart_interval = 16`), prefix compression restarts (`shared = 0`), storing the full key.
+  - An array of restart offsets is stored at the end of the block.
+  - Seeking a key binary searches across the restart array, then scans linearly through at most 16 entries.
+
+## 4. Two-Level Table Indexing & Footers
+Reading an entire SSTable into memory would overwhelm RAM.
+- **Two-Level Indexing**:
+  1. Data is partitioned into small, independently checksummed **Data Blocks** (~4 KiB each).
+  2. An **Index Block** stores one entry per data block containing the block's highest key and its `BlockHandle` (`offset` and `size`).
+  3. A two-level iterator first navigates the index block to find the data block containing the target key range, then loads that single data block.
+- **Fixed 48-Byte Footer**:
+  - The SSTable ends with a fixed 48-byte trailer containing the index block handle and a magic number (`0xdb477572706c6564ull`).
+  - To open an SSTable, the engine reads the last 48 bytes of the file, discovers the index block, and loads the index into cache.
+
+## 5. 16-Way Sharded LRU Block Cache
+Repeatedly reading 4 KiB data blocks from disk incurs substantial I/O overhead.
+- **Sharding for Concurrency**: Guarding an LRU cache with a single global mutex creates a serialization bottleneck under multi-threaded read workloads. PurpleDB splits the cache into 16 independent shards using `hash(key) >> 28`. Each shard has its own mutex and doubly-linked LRU list.
+- **Handle Refcounting & Zero-Copy Safety**:
+  - When a query reads a block from the cache, the cache returns a `Cache::Handle` that increments the block's reference count.
+  - Even if the LRU eviction algorithm evicts the block from the cache hash table to free memory, the underlying memory remains valid until the reader drops its handle (`Release()`).
+
+## 6. Manifest, VersionEdit, and CURRENT Atomic Switch
+An LSM database creates new SSTables during MemTable flushes and compaction. Tracking these files safely across crashes requires transactional metadata management:
+- **`VersionEdit`**: A record that represents incremental state changes (files added at a level, files deleted, next file number, sequence number).
+- **`MANIFEST` Log**: An append-only WAL file that records `VersionEdit`s. On startup, replaying the manifest reconstructs the active set of SSTables without needing to inspect file directory timestamps.
+- **`CURRENT` File Pointer**: Points to the active manifest file. Updating `CURRENT` is performed by writing `CURRENT.tmp` and renaming it to `CURRENT`, guaranteeing atomic filesystem directory switchover.
+
+## 7. Level 0 Overlapping SSTables & Reverse Scan Precedence
+When MemTables fill up, they are flushed directly to Level 0 (L0).
+- Unlike levels 1 through 6, where key ranges between SSTables are strictly disjoint, **L0 SSTables can have overlapping key ranges** because each flushed table covers the key range present in its MemTable.
+- **Precedence Rule**: When searching for a key, L0 files must be searched in **reverse chronological order** (newest file to oldest file). If a key exists in an older L0 file and a newer L0 file, the version in the newer file takes precedence.
+- Once the key is found or a tombstone is encountered, searching stops.
+
+## 8. Safe Recovery MemTable Flush
+When a database reopens after a shutdown:
+- Recovery replays the WAL into the in-memory MemTable.
+- If the WAL contained committed mutations, PurpleDB immediately flushes the recovered MemTable into a new L0 SSTable, logs the change in `MANIFEST`, deletes the old WAL, and opens a fresh WAL.
+- This bounds recovery time on subsequent restarts and ensures SSTable state is always clean.
+
+---
+
+## What You Should Understand Now (Milestone M3 Concepts)
+1. **Bump-Pointer Arena Allocation**: Why arena allocators eliminate heap fragmentation, provide 8-byte memory alignment, and allow $O(1)$ bulk deallocation of complex in-memory indexes.
+2. **Lock-Free Reader SkipLists**: How probabilistic multi-level linked lists achieve $O(\log N)$ search and insertion, and how `acquire`/`release` atomics enable concurrent reader access without locks.
+3. **Prefix Delta Compression & Restart Intervals**: How delta encoding compresses sorted string keys by factoring out common prefixes, and why restart arrays maintain $O(\log N)$ binary search performance.
+4. **Two-Level Indexing in Storage Files**: How index blocks map key ranges to byte offsets (`BlockHandle`), allowing point lookups to inspect exactly one 4 KiB data block rather than scanning the entire file.
+5. **Fixed Trailer Footers & Magic Numbers**: Why database file formats place a fixed-size header or footer with a magic number to enable random-access bootstrapping without reading full files.
+6. **Sharded LRU Caching & Handle Refcounting**: How sharding minimizes lock contention across CPU cores, and how reference-counted handles prevent use-after-free bugs during concurrent block eviction.
+7. **Append-Only Manifest Logging & Atomic CURRENT**: Why database engines never rewrite directory metadata in-place, and how WAL-backed manifests with atomic file renames guarantee crash-consistent state transitions.
+8. **Level 0 Overlapping File Semantics**: Why flushed L0 SSTables have overlapping key intervals and must be queried in reverse chronological order to satisfy snapshot visibility.
+

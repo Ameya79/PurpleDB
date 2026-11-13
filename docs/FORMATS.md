@@ -140,4 +140,127 @@ Every user key in the MemTable is wrapped into an `InternalKey`:
 - **Sorting Invariant**:
   1. `User Key` ascending (lexicographical bytewise order).
   2. `SequenceNumber` **descending** (higher sequence numbers appear first).
+  3. `ValueType` descending (`kTypeValue > kTypeDeletion`).
   This allows `lower_bound` lookups to immediately position on the newest version $\le$ the query sequence number.
+
+---
+
+## 5. SSTable File Format (Format Version 1)
+
+Sorted String Tables (SSTables, stored with extension `.sst` or `.ldb`) are immutable, sorted on-disk files storing persistent key-value pairs.
+
+### 5.1 High-Level File Layout
+```
++-------------------------------------------------------------+
+| Data Block 0                                                |
++-------------------------------------------------------------+
+| Data Block 1                                                |
++-------------------------------------------------------------+
+| ...                                                         |
++-------------------------------------------------------------+
+| Data Block N - 1                                            |
++-------------------------------------------------------------+
+| Index Block                                                 |
++-------------------------------------------------------------+
+| Footer (Fixed 48 Bytes)                                     |
++-------------------------------------------------------------+
+```
+
+### 5.2 Block Handle
+A `BlockHandle` points to a block within an SSTable file:
+```
++---------------------------------+----------------------------------+
+| Offset in File (Varint64)       | Size in Bytes (Varint64)         |
++---------------------------------+----------------------------------+
+```
+`kMaxEncodedLength = 20` bytes (two 10-byte Varint64s).
+
+### 5.3 Block Internal Structure & Prefix Compression
+Each block (data block or index block) contains a series of key-value entries with prefix delta compression, followed by a restart array:
+
+```
++-------------------------------------------------------------+
+| Entry 0: [shared=0][unshared][val_len][key_delta][val]      |
++-------------------------------------------------------------+
+| Entry 1: [shared][unshared][val_len][key_delta][val]        |
++-------------------------------------------------------------+
+| ...                                                         |
++-------------------------------------------------------------+
+| Entry M - 1: [shared][unshared][val_len][key_delta][val]    |
++-------------------------------------------------------------+
+| Restart Array: Fixed32 offset 0                             |
+|                Fixed32 offset 1                             |
+|                ...                                          |
+|                Fixed32 offset K - 1                         |
++-------------------------------------------------------------+
+| Restart Count: Fixed32 (K)                                  |
++-------------------------------------------------------------+
+| Compression Type (1 Byte, 0 = None)                         |
++-------------------------------------------------------------+
+| Checksum: Masked CRC-32C (4 Bytes, Fixed32)                 |
++-------------------------------------------------------------+
+```
+
+#### Entry Encoding:
+- `shared_bytes`: Varint32. Number of bytes shared with the immediately preceding key. At restart points, `shared_bytes == 0`.
+- `unshared_bytes`: Varint32. Number of new key bytes specific to this entry.
+- `value_length`: Varint32. Length of the value payload.
+- `key_delta`: Byte sequence of length `unshared_bytes`.
+- `value`: Byte sequence of length `value_length`.
+
+#### Restart Array:
+- By default, every 16 keys (`block_restart_interval = 16`), prefix compression restarts (`shared = 0`), storing the full key.
+- The 4-byte offset of each restart entry within the block is appended to the restart array at the end of the block.
+- Binary search within a block is performed across restart points, followed by a linear scan of at most 16 keys.
+
+### 5.4 Index Block
+- An index block contains one entry per data block in the SSTable.
+- The key is a separator string $\ge$ the last key of that data block and $<$ the first key of the subsequent data block (or the exact last key).
+- The value is the serialized `BlockHandle` of that data block.
+
+### 5.5 Table Footer (Fixed 48 Bytes)
+Every SSTable ends with a fixed 48-byte footer:
+```
++-----------------------------------+-----------------------------------+
+| Metaindex Handle (Encoded Handle) | Index Handle (Encoded Handle)     |
+| Padded to 20 Bytes                | Padded to 20 Bytes                |
++-----------------------------------+-----------------------------------+
+| Padding (0 Bytes)                 | Magic Number (8 Bytes, Fixed64)   |
+| 0 to 4 Bytes                      | 0xdb477572706c6564ull             |
++-----------------------------------+-----------------------------------+
+```
+- **Magic Number**: `0xdb477572706c6564ull` (ASCII byte sequence: `0xdb`, `'p'`, `'u'`, `'r'`, `'p'`, `'l'`, `'e'`, `'d'`).
+- The fixed 48-byte size allows readers to seek directly to `file_size - 48` to parse the index block location upon opening.
+
+---
+
+## 6. MANIFEST & CURRENT Architecture (Format Version 1)
+
+PurpleDB tracks active SSTables and database version evolution using an append-only `MANIFEST` log coordinated by an atomic `CURRENT` file pointer.
+
+### 6.1 CURRENT File
+- **Path**: `<dbname>/CURRENT`
+- **Content**: Plain ASCII string containing the active manifest filename followed by a newline:
+  ```
+  MANIFEST-000001\n
+  ```
+- **Atomic Pointer Update**: When rotating manifest files, the engine writes `<dbname>/CURRENT.tmp` and renames it to `CURRENT`, providing atomic POSIX / Win32 directory switchover.
+
+### 6.2 MANIFEST File
+- **Path**: `<dbname>/MANIFEST-<file_number>`
+- **Format**: Standard PurpleDB WAL log format (32 KiB blocks with 9-byte headers and CRC-32C Castagnoli checksums).
+- **Content**: A sequence of `VersionEdit` records. On recovery, replaying these records restores the active `VersionSet`.
+
+### 6.3 VersionEdit Binary Encoding
+A `VersionEdit` serializes state deltas using tag-value pairs:
+
+| Tag | Name | Type | Description |
+| :--- | :--- | :--- | :--- |
+| `0x01` | `kComparator` | Varint32 + String | Name of the active user key comparator. |
+| `0x02` | `kLogNumber` | Varint64 | Active log file number for mutations. |
+| `0x03` | `kPrevLogNumber`| Varint64 | Obsolete / previous log file number. |
+| `0x04` | `kNextFileNumber`| Varint64 | Next file number generator sequence. |
+| `0x05` | `kLastSequence` | Varint64 | Highest sequence number applied. |
+| `0x06` | `kDeletedFile` | Varint32 + Varint64 | Level number + Deleted SSTable file number. |
+| `0x07` | `kNewFile` | Varint32 + Varint64 + Varint64 + Slice + Slice | Level number + File number + File size + Smallest InternalKey + Largest InternalKey. |
+

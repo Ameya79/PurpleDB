@@ -82,3 +82,68 @@ This log documents all technical design decisions, trade-offs, and dependency ra
 - **Context**: Transactions often require updating multiple keys simultaneously (e.g. video moment index + metadata + job status).
 - **Decision**: Mutex-protected WAL appends write the entire `WriteBatch` payload as a single logical record before applying it to the MemTable.
 - **Consequences**: Eliminates partial batch application across crashes.
+
+---
+
+### ADR-011: Arena-Allocated SkipList for MemTable
+- **Date**: 2026-11-13
+- **Context**: Milestone M2 used `std::map`, which performs dynamic heap allocation for each node (causing allocator fragmentation, cache misses, and lock contention).
+- **Decision**: Replace `std::map` with an Arena-backed lock-free reader SkipList (`core/storage/skiplist.h`). The Arena uses 4 KiB block allocation with bump pointers. Node forward pointers use `std::atomic<Node*>` with acquire-release memory order.
+- **Consequences**: Readers require zero locks while a single writer updates the SkipList. Deallocation is $O(1)$ when the MemTable is flushed and the Arena is destructed.
+
+---
+
+### ADR-012: Prefix-Compressed Blocks with Restart Points
+- **Date**: 2026-11-13
+- **Context**: Keys in sorted order share significant common prefixes (e.g., `video_001_moment_0001`, `video_001_moment_0002`). Uncompressed keys waste storage bandwidth and cache footprint.
+- **Decision**: Implement delta prefix compression in `BlockBuilder` and `Block` with periodic restart points (default every 16 keys). At restart points, `shared == 0` and full keys are stored. An array of 32-bit offsets to restart points is appended to each block.
+- **Consequences**: Compresses key storage significantly. Seeking within a 4 KiB block takes $O(\log R + K)$ comparisons (binary search across restart points, then linear scan of at most 16 entries).
+
+---
+
+### ADR-013: Fixed 48-Byte SSTable Footer with Magic Number
+- **Date**: 2026-11-13
+- **Context**: Readers need to locate index blocks and identify valid SSTables without reading entire files or relying on external metadata.
+- **Decision**: Standardize on a fixed 48-byte trailer ending with magic number `0xdb477572706c6564ull`. The footer stores padded `BlockHandle`s for the metaindex block and index block.
+- **Consequences**: Readers inspect `file_size - 48` in a single random read, immediately validating the magic number and discovering the index block offset without full table parsing.
+
+---
+
+### ADR-014: 16-Way Sharded LRU Block Cache
+- **Date**: 2026-11-13
+- **Context**: High-concurrency point lookups accessing SSTables from disk incur I/O latency and mutex contention if guarded by a single global cache lock.
+- **Decision**: Implement a 16-way hash-sharded LRU cache (`core/storage/cache.h`). Each shard maintains its own doubly linked list and mutex. Cache handles are reference-counted, ensuring zero-copy read safety while permitting eviction of unreferenced blocks.
+- **Consequences**: Cache lock contention is distributed across 16 independent mutexes. Memory consumption is strictly bounded by `capacity`.
+
+---
+
+### ADR-015: MANIFEST VersionEdit Log & CURRENT File Pointer
+- **Date**: 2026-11-13
+- **Context**: The database needs to track SSTable generation across crashes, point-in-time snapshots, and background flushes.
+- **Decision**: Store database version deltas (`VersionEdit`) in an append-only `MANIFEST` file formatted as a PurpleDB WAL log. Track the active manifest via an atomic rename of `<dbname>/CURRENT.tmp` to `<dbname>/CURRENT`. Re-use existing manifest files on reopen using `NewAppendableFile`.
+- **Consequences**: Crashes during flush or reopen cannot corrupt database directory state. Replaying the manifest restores the active SSTable version set deterministically.
+
+---
+
+## Storage Engine Benchmark Measurements (M3 Real Results)
+
+In accordance with Rule 4 ("Numbers marked TARGET are goals. Measure them with the benchmark harness and record real results in docs/DECISIONS.md. Never invent numbers."), the storage engine was benchmarked using `bench/db_bench.cc`.
+
+### Configuration
+- **Platform**: Windows 11 (UCRT64 GCC 16.1.0, C++17, CMake/Ninja)
+- **Dataset**: 20,000 keys, 100-byte values (total raw payload ~2.32 MB)
+- **Options**: `write_buffer_size = 4 MiB`, `block_size = 4 KiB`, 16-shard LRU Cache enabled
+- **Date Measured**: 2026-11-13
+
+### Benchmark Results
+| Benchmark Operation | Measured Throughput (ops/sec) | Measured Bandwidth (MB/sec) | Time Elapsed |
+| :--- | :--- | :--- | :--- |
+| **fillseq** (Sequential Put) | **68,024.7 ops/sec** | **7.53 MB/sec** | 0.294 s |
+| **readrandom** (Point Get) | **476,652.4 ops/sec** | **52.73 MB/sec** | 0.042 s (20,000 / 20,000 found) |
+| **fillrandom** (Random Put) | **58,190.1 ops/sec** | **6.44 MB/sec** | 0.344 s |
+
+### Observations & Weaknesses to Address in M4
+1. **Read Performance**: Point lookups exceed 470,000 ops/sec due to the fast SkipList MemTable and sharded block cache hits.
+2. **Sequential vs Random Write**: Sequential write (68K ops/sec) is ~17% faster than random write (58K ops/sec) due to SkipList insertion locality and reduced branching during MemTable updates.
+3. **Identified Weakness**: Currently, all flushed SSTables reside in Level 0 (L0). Over time, accumulating multiple overlapping L0 SSTables requires linear scans across all L0 files for keys not found in earlier files. Milestone M4 (Leveled Compaction) will merge overlapping L0 files into non-overlapping L1+ levels to maintain $O(\log N)$ table lookups.
+
