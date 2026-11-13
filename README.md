@@ -20,7 +20,7 @@
 
 ## Overview
 
-**PurpleDB** is an embedded, single-binary multimodal database written in C++17. Unlike traditional vector search solutions that run as separate distributed microservices or glue together disparate tools (FFmpeg scripts + SQLite + external vector stores), PurpleDB unifies:
+**PurpleDB** is an embedded, single-binary multimodal database written in C++17. Unlike traditional vector search solutions that run as separate distributed microservices or glue together disparate tools (FFmpeg scripts + SQLite + external vector stores), PurpleDB combines:
 1. **LSM Storage Engine**: An embedded key-value engine with Write-Ahead Logging (WAL), an Arena-backed lock-free reader SkipList MemTable, prefix-compressed block-indexed SSTables, 16-way sharded LRU block caching, Block-Framed Bloom filters, and leveled compaction.
 2. **Key-Value Separation (WiscKey Pattern)**: Large high-dimensional vector embeddings are written to append-only vector segment files and never rewritten during LSM compaction, slashing write amplification from $30\times$ down to near $1\times$.
 3. **Temporal Multimodal Ingestion**: Automated video frame sampling (FFmpeg subprocess isolation), CLIP vision embeddings, and dynamic scene boundary detection combining temporal intervals and vectors into atomic, first-class records.
