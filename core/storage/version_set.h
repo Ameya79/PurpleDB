@@ -15,6 +15,7 @@
 namespace purpledb {
 
 struct Options;
+class Compaction;
 class VersionSet;
 
 static const int kNumLevels = 7;
@@ -113,6 +114,9 @@ class VersionSet {
 
   // Returns the level most in need of compaction, or -1 if no level needs compaction.
   int PickCompactionLevel() const;
+
+  // Constructs a Compaction job for the level returned by PickCompactionLevel().
+  std::unique_ptr<Compaction> PickCompaction();
 
   // Maximum allowed bytes for a given level before compaction is triggered.
   double MaxBytesForLevel(int level) const;

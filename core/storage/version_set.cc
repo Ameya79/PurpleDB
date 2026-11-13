@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
+#include "core/storage/compaction.h"
 #include "core/storage/filename.h"
 #include "core/storage/memtable.h"
 #include "core/storage/wal_reader.h"
@@ -266,6 +267,49 @@ double VersionSet::MaxBytesForLevel(int level) const {
     result *= 10.0;
   }
   return result;
+}
+
+std::unique_ptr<Compaction> VersionSet::PickCompaction() {
+  int level = PickCompactionLevel();
+  if (level < 0) {
+    return nullptr;
+  }
+
+  auto c = std::make_unique<Compaction>(level, current_);
+  if (level == 0) {
+    std::string smallest_user;
+    std::string largest_user;
+    for (const auto& f : current_->files(0)) {
+      c->AddInput(0, f);
+      Slice f_smallest = (f.smallest.size() >= 8) ? Slice(f.smallest.data(), f.smallest.size() - 8) : Slice(f.smallest);
+      Slice f_largest = (f.largest.size() >= 8) ? Slice(f.largest.data(), f.largest.size() - 8) : Slice(f.largest);
+      if (smallest_user.empty() || f_smallest.compare(Slice(smallest_user)) < 0) {
+        smallest_user = f_smallest.ToString();
+      }
+      if (largest_user.empty() || f_largest.compare(Slice(largest_user)) > 0) {
+        largest_user = f_largest.ToString();
+      }
+    }
+
+    std::vector<FileMetaData> overlaps;
+    current_->GetOverlappingInputs(1, Slice(smallest_user), Slice(largest_user), &overlaps);
+    for (const auto& f : overlaps) {
+      c->AddInput(1, f);
+    }
+  } else {
+    assert(!current_->files(level).empty());
+    const auto& f = current_->files(level)[0];
+    c->AddInput(0, f);
+    Slice f_smallest = (f.smallest.size() >= 8) ? Slice(f.smallest.data(), f.smallest.size() - 8) : Slice(f.smallest);
+    Slice f_largest = (f.largest.size() >= 8) ? Slice(f.largest.data(), f.largest.size() - 8) : Slice(f.largest);
+    std::vector<FileMetaData> overlaps;
+    current_->GetOverlappingInputs(level + 1, f_smallest, f_largest, &overlaps);
+    for (const auto& f_next : overlaps) {
+      c->AddInput(1, f_next);
+    }
+  }
+
+  return c;
 }
 
 Status VersionSet::LogAndApply(VersionEdit* edit) {

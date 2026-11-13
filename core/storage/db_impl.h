@@ -33,9 +33,13 @@ class DBImpl : public DB {
   // Explicitly trigger a MemTable flush to Level 0 SSTable (useful for testing and syncs)
   Status FlushMemTable();
 
+  // Run compaction on whatever level needs it
+  Status CompactOnce();
+
  private:
   Status MaybeFlushMemTable();
   Status FlushMemTableToOutputFile(MemTable* mem, uint64_t new_log_number);
+  Status DoCompactionWork(Compaction* c);
 
   Options options_;
   std::string dbname_;

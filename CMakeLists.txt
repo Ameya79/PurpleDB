@@ -50,6 +50,7 @@ set(PURPLEDB_CORE_SOURCES
   core/storage/block.cc
   core/storage/block_builder.cc
   core/storage/cache.cc
+  core/storage/compaction.cc
   core/storage/crc32c.cc
   core/storage/db_impl.cc
   core/storage/db_iter.cc
@@ -101,6 +102,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/merger_test.cc
   tests/table_test.cc
   tests/cache_test.cc
+  tests/compaction_test.cc
   tests/filter_test.cc
   tests/version_set_test.cc
   tests/env_test.cc

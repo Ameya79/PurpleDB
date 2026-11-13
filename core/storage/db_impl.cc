@@ -1,11 +1,13 @@
 #include "core/storage/db_impl.h"
 
 #include <algorithm>
+#include "core/storage/compaction.h"
 #include "core/storage/db_iter.h"
 #include "core/storage/filename.h"
 #include "core/storage/merger.h"
 #include "core/storage/table_builder.h"
 #include "core/storage/wal_reader.h"
+#include "core/util/coding.h"
 #include "core/util/logging.h"
 
 namespace purpledb {
@@ -364,6 +366,150 @@ std::unique_ptr<Iterator> DBImpl::NewIterator(const ReadOptions& options) {
 
   auto internal_iter = NewMergingIterator(&kInternalKeyBlockComparator, std::move(children));
   return NewDBIterator(std::move(internal_iter), snapshot_seq);
+}
+
+Status DBImpl::CompactOnce() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto c = versions_->PickCompaction();
+  if (c == nullptr) {
+    return Status::OK();
+  }
+  return DoCompactionWork(c.get());
+}
+
+Status DBImpl::DoCompactionWork(Compaction* c) {
+  if (c == nullptr || (c->inputs(0).empty() && c->inputs(1).empty())) {
+    return Status::OK();
+  }
+
+  const SequenceNumber smallest_snapshot = snapshots_.empty()
+      ? last_sequence_
+      : snapshots_.oldest()->sequence_number();
+
+  std::vector<std::unique_ptr<Iterator>> input_iters;
+  static const InternalKeyBlockComparator kInternalKeyBlockComparator;
+  for (int which = 0; which < 2; ++which) {
+    for (const auto& f : c->inputs(which)) {
+      std::unique_ptr<Table> table;
+      Status s = versions_->GetTable(f.number, f.file_size, &table);
+      if (!s.ok()) return s;
+      std::shared_ptr<Table> shared_table = std::move(table);
+      input_iters.push_back(Table::NewIterator(shared_table, &kInternalKeyBlockComparator));
+    }
+  }
+
+  auto input = NewMergingIterator(&kInternalKeyBlockComparator, std::move(input_iters));
+
+  const int out_level = c->level() + 1;
+  std::unique_ptr<WritableFile> outfile;
+  std::unique_ptr<TableBuilder> builder;
+  uint64_t current_file_number = 0;
+  std::string current_smallest;
+  std::string current_largest;
+  Status s;
+
+  auto open_compaction_output = [&]() -> Status {
+    current_file_number = versions_->NewFileNumber();
+    std::string fname = TableFileName(dbname_, current_file_number);
+    Status st = env_->NewWritableFile(fname, &outfile);
+    if (!st.ok()) return st;
+
+    TableBuilderOptions tb_opts;
+    tb_opts.block_size = options_.block_size;
+    tb_opts.comparator = &kInternalKeyBlockComparator;
+    tb_opts.filter_policy = options_.filter_policy;
+    builder = std::make_unique<TableBuilder>(tb_opts, outfile.get());
+    current_smallest.clear();
+    current_largest.clear();
+    return Status::OK();
+  };
+
+  auto finish_compaction_output = [&]() -> Status {
+    if (builder != nullptr && builder->NumEntries() > 0) {
+      Status st = builder->Finish();
+      if (!st.ok()) return st;
+      st = outfile->Close();
+      if (!st.ok()) return st;
+
+      c->edit()->AddFile(out_level, current_file_number, builder->FileSize(),
+                         Slice(current_smallest), Slice(current_largest));
+      builder.reset();
+      outfile.reset();
+    }
+    return Status::OK();
+  };
+
+  std::string last_user_key;
+  bool has_last_user_key = false;
+
+  for (input->SeekToFirst(); input->Valid(); input->Next()) {
+    Slice ikey = input->key();
+    Slice val = input->value();
+    if (ikey.size() < 8) continue;
+
+    Slice ukey(ikey.data(), ikey.size() - 8);
+    uint64_t tag = DecodeFixed64(ikey.data() + ikey.size() - 8);
+    SequenceNumber seq = tag >> 8;
+    ValueType type = static_cast<ValueType>(tag & 0xff);
+
+    bool drop = false;
+    if (!has_last_user_key || ukey != Slice(last_user_key)) {
+      last_user_key = ukey.ToString();
+      has_last_user_key = true;
+    } else {
+      // Overwritten older version of the same user key
+      if (seq <= smallest_snapshot) {
+        drop = true;
+      }
+    }
+
+    if (!drop && type == kTypeDeletion) {
+      if (seq <= smallest_snapshot && c->IsBaseLevelForKey(ukey)) {
+        drop = true;
+      }
+    }
+
+    if (!drop) {
+      if (builder == nullptr) {
+        s = open_compaction_output();
+        if (!s.ok()) return s;
+      }
+      if (current_smallest.empty()) {
+        current_smallest = ikey.ToString();
+      }
+      current_largest = ikey.ToString();
+      builder->Add(ikey, val);
+
+      if (builder->FileSize() >= 2 * 1024 * 1024) {
+        s = finish_compaction_output();
+        if (!s.ok()) return s;
+      }
+    }
+  }
+
+  s = finish_compaction_output();
+  if (!s.ok()) return s;
+
+  // Mark input files for deletion in manifest
+  for (int which = 0; which < 2; ++which) {
+    int lvl = (which == 0) ? c->level() : c->level() + 1;
+    for (const auto& f : c->inputs(which)) {
+      c->edit()->RemoveFile(lvl, f.number);
+    }
+  }
+
+  // Atomically apply compaction edit to VersionSet
+  s = versions_->LogAndApply(c->edit());
+  if (!s.ok()) return s;
+
+  // Delete obsolete on-disk files
+  for (int which = 0; which < 2; ++which) {
+    for (const auto& f : c->inputs(which)) {
+      env_->DeleteFile(TableFileName(dbname_, f.number));
+    }
+  }
+
+  return Status::OK();
 }
 
 }  // namespace purpledb
