@@ -52,6 +52,17 @@ class Version {
   // Number of files in Level 0.
   size_t NumLevelFiles(int level) const { return files_[level].size(); }
 
+  // Total byte size of all files in a level.
+  uint64_t TotalBytes(int level) const;
+
+  // Find all files in "level" whose key range overlaps [smallest_user, largest_user].
+  void GetOverlappingInputs(int level, const Slice& smallest_user,
+                           const Slice& largest_user,
+                           std::vector<FileMetaData>* inputs) const;
+
+  // Add child iterators for all files across all levels to *iters.
+  void AddIterators(std::vector<std::unique_ptr<Iterator>>* iters);
+
  private:
   friend class VersionSet;
   friend class VersionBuilder;
@@ -99,6 +110,12 @@ class VersionSet {
 
   uint64_t LogNumber() const { return log_number_; }
   uint64_t PrevLogNumber() const { return prev_log_number_; }
+
+  // Returns the level most in need of compaction, or -1 if no level needs compaction.
+  int PickCompactionLevel() const;
+
+  // Maximum allowed bytes for a given level before compaction is triggered.
+  double MaxBytesForLevel(int level) const;
 
   // Open an SSTable for reading.
   Status GetTable(uint64_t file_number, uint64_t file_size,

@@ -24,7 +24,13 @@ Version::~Version() {
 
 bool Version::Get(const Slice& user_key, SequenceNumber snapshot_seq,
                   std::string* val, Status* s) {
-  // Search L0 files in reverse order (newest to oldest)
+  static const InternalKeyBlockComparator kInternalKeyBlockComparator;
+  std::string lookup_key;
+  lookup_key.append(user_key.data(), user_key.size());
+  PutFixed64(&lookup_key, (snapshot_seq << 8) | static_cast<uint8_t>(kTypeValue));
+  Cache* block_cache = (vset_->options() != nullptr) ? vset_->options()->block_cache.get() : nullptr;
+
+  // 1. Search Level 0 files in reverse order (newest to oldest, may overlap)
   for (int i = static_cast<int>(files_[0].size()) - 1; i >= 0; --i) {
     const FileMetaData& f = files_[0][i];
     if (f.smallest.size() < 8 || f.largest.size() < 8) {
@@ -45,13 +51,6 @@ bool Version::Get(const Slice& user_key, SequenceNumber snapshot_seq,
       return true;
     }
 
-    static const InternalKeyBlockComparator kInternalKeyBlockComparator;
-    // Build internal lookup key: user_key + max tag for snapshot_seq
-    std::string lookup_key;
-    lookup_key.append(user_key.data(), user_key.size());
-    PutFixed64(&lookup_key, (snapshot_seq << 8) | static_cast<uint8_t>(kTypeValue));
-
-    Cache* block_cache = (vset_->options() != nullptr) ? vset_->options()->block_cache.get() : nullptr;
     if (table->InternalGet(Slice(lookup_key), &kInternalKeyBlockComparator, val, s, block_cache)) {
       return true;
     }
@@ -60,7 +59,85 @@ bool Version::Get(const Slice& user_key, SequenceNumber snapshot_seq,
     }
   }
 
+  // 2. Search Level 1 to kNumLevels - 1 (non-overlapping, disjoint key ranges per level)
+  for (int level = 1; level < kNumLevels; ++level) {
+    if (files_[level].empty()) {
+      continue;
+    }
+
+    // Binary search for candidate file covering user_key
+    int left = 0;
+    int right = static_cast<int>(files_[level].size()) - 1;
+    int candidate = -1;
+    while (left <= right) {
+      int mid = left + (right - left) / 2;
+      const FileMetaData& f = files_[level][mid];
+      Slice largest_user = (f.largest.size() >= 8) ? Slice(f.largest.data(), f.largest.size() - 8) : Slice(f.largest);
+      if (largest_user.compare(user_key) >= 0) {
+        candidate = mid;
+        right = mid - 1;
+      } else {
+        left = mid + 1;
+      }
+    }
+
+    if (candidate != -1) {
+      const FileMetaData& f = files_[level][candidate];
+      Slice smallest_user = (f.smallest.size() >= 8) ? Slice(f.smallest.data(), f.smallest.size() - 8) : Slice(f.smallest);
+      if (user_key.compare(smallest_user) >= 0) {
+        // user_key is strictly within [smallest_user, largest_user]
+        std::unique_ptr<Table> table;
+        Status open_status = vset_->GetTable(f.number, f.file_size, &table);
+        if (!open_status.ok()) {
+          *s = open_status;
+          return true;
+        }
+
+        if (table->InternalGet(Slice(lookup_key), &kInternalKeyBlockComparator, val, s, block_cache)) {
+          return true;
+        }
+        if (!s->ok()) {
+          return true;
+        }
+      }
+    }
+  }
+
   return false;
+}
+
+uint64_t Version::TotalBytes(int level) const {
+  uint64_t total = 0;
+  for (const auto& f : files_[level]) {
+    total += f.file_size;
+  }
+  return total;
+}
+
+void Version::GetOverlappingInputs(int level, const Slice& smallest_user,
+                                   const Slice& largest_user,
+                                   std::vector<FileMetaData>* inputs) const {
+  inputs->clear();
+  for (const auto& f : files_[level]) {
+    Slice f_smallest = (f.smallest.size() >= 8) ? Slice(f.smallest.data(), f.smallest.size() - 8) : Slice(f.smallest);
+    Slice f_largest = (f.largest.size() >= 8) ? Slice(f.largest.data(), f.largest.size() - 8) : Slice(f.largest);
+    if (f_smallest.compare(largest_user) <= 0 && f_largest.compare(smallest_user) >= 0) {
+      inputs->push_back(f);
+    }
+  }
+}
+
+void Version::AddIterators(std::vector<std::unique_ptr<Iterator>>* iters) {
+  static const InternalKeyBlockComparator kInternalKeyBlockComparator;
+  for (int level = 0; level < kNumLevels; ++level) {
+    for (const auto& f : files_[level]) {
+      std::unique_ptr<Table> table;
+      if (vset_->GetTable(f.number, f.file_size, &table).ok()) {
+        std::shared_ptr<Table> shared_table = std::move(table);
+        iters->push_back(Table::NewIterator(shared_table, &kInternalKeyBlockComparator));
+      }
+    }
+  }
 }
 
 class VersionSet::Builder {
@@ -99,6 +176,15 @@ class VersionSet::Builder {
   void SaveTo(Version* v) {
     for (int level = 0; level < kNumLevels; level++) {
       v->files_[level] = added_files_[level];
+    }
+    // Maintain non-overlapping sorted order for levels >= 1
+    for (int level = 1; level < kNumLevels; level++) {
+      std::sort(v->files_[level].begin(), v->files_[level].end(),
+                [](const FileMetaData& a, const FileMetaData& b) {
+                  Slice a_user = (a.smallest.size() >= 8) ? Slice(a.smallest.data(), a.smallest.size() - 8) : Slice(a.smallest);
+                  Slice b_user = (b.smallest.size() >= 8) ? Slice(b.smallest.data(), b.smallest.size() - 8) : Slice(b.smallest);
+                  return a_user.compare(b_user) < 0;
+                });
     }
   }
 
@@ -151,6 +237,35 @@ Status VersionSet::GetTable(uint64_t file_number, uint64_t file_size,
 
   const FilterPolicy* filter_policy = options_ ? options_->filter_policy : nullptr;
   return Table::Open(std::move(file), file_size, table, filter_policy);
+}
+
+int VersionSet::PickCompactionLevel() const {
+  // Level 0: compact when >= 4 files
+  if (current_->NumLevelFiles(0) >= 4) {
+    return 0;
+  }
+
+  // Level 1 to 5: check byte size limits
+  double best_score = 1.0;
+  int best_level = -1;
+  for (int level = 1; level < kNumLevels - 1; ++level) {
+    double limit = MaxBytesForLevel(level);
+    double score = static_cast<double>(current_->TotalBytes(level)) / limit;
+    if (score > best_score) {
+      best_score = score;
+      best_level = level;
+    }
+  }
+  return best_level;
+}
+
+double VersionSet::MaxBytesForLevel(int level) const {
+  // L1 target: 64 MB. Level N+1 = 10x Level N
+  double result = 64.0 * 1048576.0;
+  for (int i = 1; i < level; ++i) {
+    result *= 10.0;
+  }
+  return result;
 }
 
 Status VersionSet::LogAndApply(VersionEdit* edit) {

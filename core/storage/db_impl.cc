@@ -358,16 +358,9 @@ std::unique_ptr<Iterator> DBImpl::NewIterator(const ReadOptions& options) {
     children.push_back(imm_->NewIterator());
   }
 
-  // Add L0 SSTables
+  // Add SSTables across all levels (L0 to L6)
   static const InternalKeyBlockComparator kInternalKeyBlockComparator;
-  Version* current = versions_->current();
-  for (const auto& f : current->files(0)) {
-    std::unique_ptr<Table> table;
-    if (versions_->GetTable(f.number, f.file_size, &table).ok()) {
-      std::shared_ptr<Table> shared_table = std::move(table);
-      children.push_back(Table::NewIterator(shared_table, &kInternalKeyBlockComparator));
-    }
-  }
+  versions_->current()->AddIterators(&children);
 
   auto internal_iter = NewMergingIterator(&kInternalKeyBlockComparator, std::move(children));
   return NewDBIterator(std::move(internal_iter), snapshot_seq);
