@@ -91,7 +91,58 @@ set(PURPLEDB_CORE_SOURCES
   core/util/status.cc
 )
 
-add_library(purpledb_core STATIC ${PURPLEDB_CORE_SOURCES})
+set(PURPLEDB_CORE_HEADERS
+  core/include/purpledb/db.h
+  core/include/purpledb/filter_policy.h
+  core/include/purpledb/iterator.h
+  core/include/purpledb/purpledb_c.h
+  core/include/purpledb/slice.h
+  core/include/purpledb/status.h
+  core/include/purpledb/write_batch.h
+  core/embed/api_adapter.h
+  core/embed/embedder.h
+  core/embed/local_embedder.h
+  core/pipeline/frame_decoder.h
+  core/pipeline/ingest_job.h
+  core/pipeline/moment_detector.h
+  core/query/moment_metadata.h
+  core/query/query_engine.h
+  core/storage/block.h
+  core/storage/block_builder.h
+  core/storage/cache.h
+  core/storage/compaction.h
+  core/storage/crc32c.h
+  core/storage/db_impl.h
+  core/storage/db_iter.h
+  core/storage/env.h
+  core/storage/filename.h
+  core/storage/filter_block.h
+  core/storage/format.h
+  core/storage/memtable.h
+  core/storage/merger.h
+  core/storage/skiplist.h
+  core/storage/snapshot.h
+  core/storage/table.h
+  core/storage/table_builder.h
+  core/storage/version_edit.h
+  core/storage/version_set.h
+  core/storage/wal_format.h
+  core/storage/wal_reader.h
+  core/storage/wal_writer.h
+  core/util/arena.h
+  core/util/coding.h
+  core/util/hash.h
+  core/util/logging.h
+  core/util/sha256.h
+  core/util/test_harness.h
+  core/vector/delete_bitmap.h
+  core/vector/distance.h
+  core/vector/hnsw.h
+  core/vector/vector_index.h
+  core/vector/vector_segment.h
+)
+
+add_library(purpledb_core STATIC ${PURPLEDB_CORE_SOURCES} ${PURPLEDB_CORE_HEADERS})
 
 target_include_directories(purpledb_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

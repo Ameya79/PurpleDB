@@ -1,7 +1,9 @@
 CompileFlags:
-  CompilationDatabase: "."
   Add:
     - -std=c++17
+    - -IC:/Users/vinay/OneDrive/Desktop/Purpled
+    - -IC:/Users/vinay/OneDrive/Desktop/Purpled/include
+    - -IC:/Users/vinay/OneDrive/Desktop/Purpled/purpledb
     - -IC:/Users/vinay/OneDrive/Desktop/Purpled/core/include
     - -IC:/Users/vinay/OneDrive/Desktop/Purpled/core
-    - -IC:/Users/vinay/OneDrive/Desktop/Purpled
+    - -IC:/Users/vinay/OneDrive/Desktop/Purpled/util
