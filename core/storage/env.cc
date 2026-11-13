@@ -7,9 +7,16 @@
 #include <iostream>
 
 #if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #undef DeleteFile
+#undef min
+#undef max
 #include <io.h>
 #else
 #include <fcntl.h>
@@ -137,7 +144,7 @@ class StdioWritableFile : public WritableFile {
     const char* write_data = data.data();
 
     // Fill buffer if possible
-    size_t copy_size = std::min(write_size, kWritableFileBufferSize - pos_);
+    size_t copy_size = (std::min)(write_size, kWritableFileBufferSize - pos_);
     std::memcpy(buf_ + pos_, write_data, copy_size);
     write_data += copy_size;
     write_size -= copy_size;

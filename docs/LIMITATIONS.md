@@ -47,3 +47,4 @@ This document details the known operational constraints, concurrency boundaries,
 ## 4. Key and Value Size Limits
 - **Maximum Key Size**: Recommended $\le 4\text{ KiB}$ (enforced by Varint length prefixing). Keys larger than block size will degrade prefix compression and block search performance.
 - **Maximum Value Size**: Suitable for arbitrary binary blobs up to 10 MiB in the KV engine. However, high-dimensional vector embeddings ($\ge 2\text{ KiB}$) will bypass SSTables starting in Milestone M5 via append-only vector segment files (WiscKey KV separation pattern).
+
