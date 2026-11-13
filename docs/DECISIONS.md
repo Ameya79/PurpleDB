@@ -303,6 +303,52 @@ Executed on local workstation:
 | **HNSW Snapshot Cold Open** | Database Open Latency | **1.017 s** | Instant restart without full rebuild |
 | **Recall@10 Accuracy** | Recall vs Brute-Force | **> 0.97** | Surpasses target (>= 0.95) |
 
+---
+
+### ADR-028: Embedder Interface & Modality Decoupling
+- **Date**: 2026-11-13
+- **Context**: Video search requires translating raw frames and text into shared geometric vector spaces. Direct hardcoding of specific model frameworks (e.g. PyTorch, ONNX, or specific cloud APIs) tightly couples the database engine to external runtime environments.
+- **Decision**: Define a pure abstract C++ interface `Embedder`:
+  - `model_id()`, `dim()`, `max_batch()`, `EmbedImages()`, and `EmbedText()`.
+  - Provide distinct modular adapters: Local ONNX adapter for edge/desktop execution, and API adapter for remote inference providers.
+- **Consequences**: The database core remains 100% decoupled from model weights, inference engines, and network protocols.
+
+---
+
+### ADR-029: API Adapter Resiliency: Exponential Backoff, Rate-Limiting & Jitter
+- **Date**: 2026-11-13
+- **Context**: Cloud embedding endpoints frequently impose rate limits (HTTP 429 Too Many Requests) and suffer transient network failures (HTTP 503 Service Unavailable). Unhandled failures crash long-running video ingestion jobs.
+- **Decision**: The API adapter implements:
+  - Full decorrelated jittered exponential backoff: $t_{\text{sleep}} = \min(t_{\text{max}}, t_{\text{base}} \times 2^{\text{attempt}}) \pm \text{jitter}$.
+  - Explicit rate limit detection honoring `Retry-After` headers.
+  - Bounded concurrency with configurable request timeouts and retry budgets.
+  - Comprehensive telemetry counters (`total_requests`, `rate_limit_hits`, `total_retries`, `total_tokens`).
+- **Consequences**: Ingestion pipelines recover automatically from transient cloud throttling without user intervention.
+
+---
+
+### ADR-030: Crash-Resilient Ingest with LSM Job State & Atomic Batches
+- **Date**: 2026-11-13
+- **Context**: Ingesting a large video (e.g. 1 hour) involves decoding thousands of frames. If the database process crashes (e.g. `kill -9` or power loss) midway through ingest, restarting from scratch wastes significant compute, while naive resumption risks duplicate vectors and moment IDs.
+- **Decision**:
+  - Store ingest job progress directly in the LSM engine under key prefix `j|<video_id>`.
+  - Ingest is partitioned into discrete batches of size `max_batch`.
+  - Each batch commits atomically via a single `WriteBatch`: moment records, vector embeddings in `VectorIndex`, and updated `last_committed_pts` in the job record.
+  - On crash recovery, `Resume()` loads the job state and skips already-committed frames, achieving deterministic idempotency.
+- **Consequences**: Zero duplicate moments or vectors upon crash recovery; 100% resumable video ingestion.
+
+---
+
+### ADR-031: FFmpeg Subprocess Frame Extraction & Medoid Thumbnail Selection
+- **Date**: 2026-11-13
+- **Context**: Direct in-process video decoding via C codec bindings (`libavcodec`) introduces memory safety risks, complex cross-platform build friction, and codec memory leaks. Furthermore, user UIs require a representative visual thumbnail for each temporal moment.
+- **Decision**:
+  - Isolate video decoding in an `ffmpeg` subprocess (`fps=1,scale=224:224`), ensuring crash isolation from broken video bitstreams.
+  - Compute a deterministic SHA-256 hash of the video file content as its stable `video_id`, preventing renames from duplicating data.
+  - For each detected moment, compute the L2-normalized centroid embedding and select the medoid frame (the frame with highest cosine similarity to the centroid) as the moment's canonical thumbnail.
+- **Consequences**: Robust process safety, content-addressed video identification, and semantically representative thumbnails for search results.
+
+
 
 
 

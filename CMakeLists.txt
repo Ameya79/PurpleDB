@@ -74,11 +74,17 @@ set(PURPLEDB_CORE_SOURCES
   core/vector/vector_segment.cc
   core/vector/vector_index.cc
   core/vector/hnsw.cc
+  core/embed/api_adapter.cc
+  core/embed/local_embedder.cc
+  core/pipeline/frame_decoder.cc
+  core/pipeline/ingest_job.cc
+  core/pipeline/moment_detector.cc
   core/util/arena.cc
   core/util/coding.cc
   core/util/hash.cc
   core/util/iterator.cc
   core/util/logging.cc
+  core/util/sha256.cc
   core/util/slice.cc
   core/util/status.cc
 )
@@ -126,6 +132,12 @@ set(PURPLEDB_TEST_SOURCES
   tests/m5_acceptance_test.cc
   tests/hnsw_test.cc
   tests/m6_acceptance_test.cc
+  tests/embedder_test.cc
+  tests/sha256_test.cc
+  tests/moment_detector_test.cc
+  tests/frame_decoder_test.cc
+  tests/ingest_job_test.cc
+  tests/m7_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})

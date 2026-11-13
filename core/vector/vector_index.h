@@ -106,6 +106,7 @@ class VectorIndex {
 
   const VectorOptions& options() const { return options_; }
   HNSW* hnsw() { return hnsw_.get(); }
+  DB* db() const { return db_.get(); }
 
  private:
   VectorIndex(const VectorOptions& options, const std::string& db_path,

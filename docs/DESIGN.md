@@ -646,6 +646,55 @@ Deleting vectors from a proximity graph without breaking navigation paths is com
 6. **Tombstone Vacuuming**: Why proximity graphs favor bitset tombstones for online deletes, followed by asynchronous vacuum rebuilds when tombstone density degrades navigation paths.
 7. **Recall@K Evaluation**: How to evaluate an approximate nearest neighbor index against an exact brute-force ground truth using set intersection over Top-$K$ results.
 
+---
+
+# PurpleDB Architecture & Design Rationale — Milestone M7 (Embedders & Ingest Pipeline)
+
+Milestone M7 bridges raw video media and high-dimensional vector indexing, delivering an automated, crash-resilient ingestion pipeline and pluggable multimodal embedding architecture.
+
+## 1. Embedder Interface & Modality Decoupling
+To avoid hardcoding external machine learning frameworks into the database storage engine, PurpleDB employs the **Dependency Inversion Principle**:
+- **The Core Interface (`core/embed/embedder.h`)**: `Embedder` defines an abstract contract (`model_id()`, `dim()`, `max_batch()`, `EmbedImages()`, and `EmbedText()`).
+- **Zero-Copy Image Views (`ImageRef`)**: Carries either raw RGB in-memory pixel buffers or on-disk file references without unnecessary memory copying.
+- **Invariant Enforcement**: Every vector emitted by any embedder adapter is immediately verified and projected onto the unit hypersphere ($\|v\|_2 = 1.0$), ensuring mathematical equivalence between cosine similarity and dot product across the engine.
+
+## 2. API Adapter Resiliency: Rate Limiting & Jittered Backoff
+Remote embedding APIs (OpenAI, Voyage, Google Cloud) introduce network flakiness and strict rate quotas.
+- **HTTP 429 Rate Limits**: When an endpoint returns HTTP 429 (Too Many Requests), the adapter parses optional `Retry-After` headers and backs off before retrying.
+- **Full Jitter Exponential Backoff**: To avoid the "thundering herd" problem where multiple concurrent threads retry simultaneously:
+  $$t_{\text{sleep}} = \min(t_{\text{max}}, t_{\text{base}} \times 2^{\text{attempt}}) + \text{uniform}(0, \text{jitter})$$
+- **Mock Transport Decoupling**: An abstract `HttpTransport` interface allows deterministic unit and acceptance testing of network failure modes with zero external internet dependencies.
+
+## 3. Crash Resilience & Resumable Ingest Jobs
+Ingesting large video files requires processing thousands of frames. A sudden power failure or process kill (`kill -9`) must not corrupt the database or force a full re-ingestion from second zero.
+- **LSM Job State Tracking (`j|<video_id>`)**: Ingest progress is tracked in the LSM engine under key prefix `'j'`. The record stores `status` (Pending, Running, Completed), `last_committed_pts`, and `moments_count`, sealed with a Castagnoli CRC-32C checksum.
+- **Atomic Batch Commits**: Ingestion processes video frames in discrete batches (e.g. 16 frames). Each batch atomically commits:
+  1. Moment metadata records (`m|<video_id>:<moment_id>`).
+  2. Embeddings to the append-only `.vec` segment and HNSW graph.
+  3. Updated `last_committed_pts` in the job state record.
+- **Idempotency on Recovery**: Reopening the database and resuming an ingest job skips all frames where `timestamp <= last_committed_pts`. Re-running on a completed video returns immediately with zero duplicate vectors or moments.
+
+## 4. Subprocess FFmpeg Isolation
+Video codecs (`libavcodec`/`libavformat`) contain complex C bitstream parsers vulnerable to memory safety faults when processing malformed media from untrusted sources.
+- **Process Isolation**: PurpleDB isolates video decoding into an external `ffmpeg` subprocess (`fps=1,scale=224:224`). If an invalid video triggers a codec fault, only the child process dies; the database catches the return code, reports a clean error status, and remains running.
+- **Deterministic Content Addressing**: A SHA-256 hash of the video bitstream serves as the permanent `video_id`. Renaming, copying, or moving a video file resolves to the identical database identity, preventing duplicate vector storage.
+
+## 5. Centroid & Medoid Moment Representation
+- **Centroid Embedding**: A moment's semantic vector is the normalized vector sum of all its constituent frame embeddings: $\hat{c} = \frac{\sum v_i}{\|\sum v_i\|}$.
+- **Medoid Thumbnail**: Rather than picking an arbitrary frame (such as the first frame, which may be a transition or black screen), the pipeline selects the **medoid frame**—the actual video frame whose embedding exhibits maximum cosine similarity to the centroid. This guarantees semantically representative thumbnails for user search interfaces.
+
+---
+
+## What You Should Understand Now (Milestone M7 Concepts)
+1. **Dependency Inversion in AI Systems**: Why decoupling abstract inference contracts (`Embedder`) from concrete inference engines (ONNX Runtime, cloud REST endpoints) makes database storage engines portable, testable, and future-proof.
+2. **Exponential Backoff with Full Jitter**: Why decorrelated random jitter is mathematically essential when retrying rate-limited cloud API calls to prevent synchronized retry spikes.
+3. **Resumable Write Batches**: How coordinating LSM state checkpoints with append-only data files ensures zero-duplicate crash recovery under abrupt process termination.
+4. **Subprocess Sandboxing for Untrusted Media**: Why high-reliability database engines isolate video/image decoding outside the main server address space to prevent codec crashes from terminating the database.
+5. **Content-Addressed Entity Hashing**: How SHA-256 bitstream hashes eliminate duplicate storage when media files are renamed, moved, or uploaded via different client paths.
+6. **Centroid vs Medoid Selection**: The difference between an average geometric vector (centroid) and the most representative actual physical observation (medoid) for thumbnail generation.
+7. **Two-Phase Multimodal Retrieval**: How text queries and image frames projected into a shared cosine hypersphere enable instant cross-modal search without intermediate text tagging.
+
+
 
 
 
