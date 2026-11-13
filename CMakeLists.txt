@@ -76,6 +76,7 @@ set(PURPLEDB_CORE_SOURCES
   core/vector/hnsw.cc
   core/embed/api_adapter.cc
   core/embed/local_embedder.cc
+  core/pipeline/frame_decoder.cc
   core/pipeline/moment_detector.cc
   core/util/arena.cc
   core/util/coding.cc
@@ -133,6 +134,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/embedder_test.cc
   tests/sha256_test.cc
   tests/moment_detector_test.cc
+  tests/frame_decoder_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
