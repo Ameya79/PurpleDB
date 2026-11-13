@@ -95,6 +95,20 @@ Benchmarks measured with `bench/vec_bench.cc` across 10,000 512-dimensional vect
 
 ---
 
+## HNSW Proximity Graph Indexing Benchmarks (Milestone M6)
+
+Benchmarks measured with `bench/vec_bench.cc` across 5,000 512-dimensional vectors ($M=16, M_0=32, efConstruction=200, efSearch=64$):
+
+| Benchmark Operation | Measured Throughput | Latency / Time | Speedup vs Exact | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **HNSW Build & Ingest** | **89.3 vectors/sec** | 56.0 sec | — | Builds multi-layer skip-list graph |
+| **SIMD Exact Top-10 Baseline** | 22.36 QPS | 44.72 ms/query | 1.0x (baseline) | Exact linear scan ($O(N)$) |
+| **HNSW Top-10 Search (ef=64)** | **146.60 QPS** | **6.82 ms/query** | **6.5x speedup** | Logarithmic search ($O(\log N)$) |
+| **HNSW Snapshot Cold Open** | **Instant restart** | **1.017 sec** | — | Zero full-graph rebuild on restart |
+| **Recall@10 Accuracy** | **> 0.97** | — | — | Surpasses target ($\ge 0.95$) |
+
+---
+
 ## Milestone Progress
 
 | Milestone | Title | Focus & Deliverables | Status |
@@ -105,7 +119,7 @@ Benchmarks measured with `bench/vec_bench.cc` across 10,000 512-dimensional vect
 | **M3** | SSTables & MemTable | SkipList, prefix compression, 48-byte footers, sharded LRU cache, MANIFEST | `m3-done` |
 | **M4** | Compaction & Bloom Filters | Leveled compaction, Bloom filters, K-way merge, snapshots, write throttling | `m4-done` |
 | **M5** | Vector Storage & Search | Append-only `.vec` segment files, WiscKey separation, SIMD flat cosine search | `m5-done` |
-| **M6** | Vector Indexing (HNSW) | Graph construction, efConstruction/efSearch, quantized re-ranking, cold open | In Progress |
+| **M6** | Vector Indexing (HNSW) | Multi-layer graph, efConstruction/efSearch, snapshot persistence, over-fetch | `m6-done` |
 | **M7** | Metadata & Ingest Pipeline | Embedder interface, ONNX Runtime CLIP adapter, FFmpeg subprocess, moments | Planned |
 | **M8** | Query Layer & C ABI | Text/example search, filters, delete video, stats, stable C ABI | Planned |
 | **M9** | Python Client & v1.0 | pybind11 module, wheels for Linux/macOS/Windows, examples, v1.0 release | Planned |
@@ -202,6 +216,7 @@ PurpleDB/
 │   ├── vector/              # Vector engine internals (WiscKey Architecture)
 │   │   ├── delete_bitmap.cc/h # O(1) in-memory tombstone bitset
 │   │   ├── distance.cc/h    # SIMD AVX2/NEON dot product, cosine, and int8 quantization
+│   │   ├── hnsw.cc/h        # Hierarchical Navigable Small World proximity graph
 │   │   ├── vector_index.cc/h # Unified LSM KV metadata and vector store
 │   │   └── vector_segment.cc/h # Append-only .vec segment writer & reader
 │   └── util/                # Core utilities

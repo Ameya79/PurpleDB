@@ -584,5 +584,68 @@ To prevent partial writes or power failures from corrupting vector segments:
 6. **Model Lock Safety**: Why multimodal databases must enforce invariant checks on vector dimension, metric, and model ID to prevent corrupting similarity spaces across different embedding models.
 7. **Top-K Bounded Priority Queue**: How a min-heap of size $K$ extracts the top $K$ nearest neighbors in $O(N \log K)$ time and $O(K)$ auxiliary memory without sorting all $N$ candidates.
 
+---
+
+# PurpleDB Architecture & Design Rationale — Milestone M6 (HNSW Proximity Graph Indexing)
+
+Milestone M6 delivers the core indexing engine of PurpleDB: the **Hierarchical Navigable Small World (HNSW)** proximity graph. HNSW slashes vector retrieval latency from $O(N)$ linear scans down to logarithmic $O(\log N)$ graph traversals while maintaining $> 0.95$ Recall@10.
+
+## 1. The Proximity Graph & Multi-Layer Skip-List Analogy
+Brute-force exact search compares a query against every single vector in the database. While SIMD acceleration achieves sub-50 ms latencies for 10,000 vectors, searching 1,000,000 video moments would require 5 seconds per query—completely unacceptable for interactive user search.
+
+HNSW organizes vectors as a multi-layer graph, directly analogous to a probabilistic **Skip List**:
+- **Upper Layers (Sparse)**: Contain very few nodes connected by long-range geometric edges ("express lanes"). Greedy routing quickly traverses vast regions of the vector space in a handful of hops.
+- **Base Layer 0 (Dense)**: Contains all $N$ nodes connected by dense, local proximity edges. A beam search explores the immediate neighborhood with beam width $efSearch$ to locate the true nearest neighbors.
+
+## 2. Exponential Level Distribution
+Each inserted vector is assigned a maximum layer $l$ using an exponential probability distribution parameterized by scale factor $m_L = 1 / \ln(M)$:
+$$l = \lfloor - \ln(\text{uniform}(0, 1]) \cdot m_L \rfloor$$
+- For $M=16$, $m_L \approx 0.36067$.
+- The probability that a node reaches layer $l$ decays exponentially as $1 / M^l$.
+- This guarantees logarithmic diameter and logarithmic search complexity ($O(\log N)$) without centralized balancing algorithms.
+
+## 3. Greedy Routing vs Beam Search (efConstruction & efSearch)
+HNSW combines two distinct graph navigation algorithms:
+1. **Greedy 1-Best Search (Upper Layers)**: At layer $l > 0$, navigation is strictly greedy: from current node $v$, evaluate distance to all neighbors of $v$. If any neighbor is closer to query $q$, move there. When no neighbor is closer, descend to layer $l - 1$.
+2. **Beam Search / SearchLayer (Base Layer)**: At layer 0, a priority queue maintains the $ef$ closest candidates discovered so far. The algorithm expands the most promising unexplored candidate until the closest unvisited candidate is further than the furthest element in the priority queue.
+   - During index construction: $ef = efConstruction = 200$.
+   - During query execution: $ef = efSearch = 64$.
+   - Larger $ef$ improves recall at the expense of evaluating more distance metrics.
+
+## 4. Bidirectional Edge Pruning & Small-World Clustering
+When node $u$ connects to neighbor $v$, a reciprocal edge $v \rightarrow u$ is also added.
+- **Degree Bounding**: To prevent high-density clusters from growing unbounded neighbor lists (which would degrade search latency), each node is capped at $M$ edges on upper layers and $M_0 = 2M$ edges on Layer 0.
+- **Neighbor Pruning**: If adding reciprocal edges causes node $v$ to exceed its capacity, its neighbor list is sorted by distance to $v$, and only the closest $M$ (or $M_0$) neighbors are retained. This maintains the "small-world" clustering coefficient across the entire graph.
+
+## 5. Snapshot Persistence & Tail Replay Recovery
+Rebuilding an HNSW graph across millions of vectors on database restart would take minutes of heavy CPU computation.
+- **Snapshot File (`index.hnsw`)**: PurpleDB serializes the entire graph topology (node levels, degrees, and adjacency lists) directly to disk, secured by a trailing Castagnoli CRC-32C checksum.
+- **Incremental Tail Replay**: When opening a database:
+  1. Load and verify `index.hnsw` in $< 1\text{ second}$.
+  2. If the snapshot contains $K$ vectors and the durable append-only segment contains $N > K$ vectors, the recovery engine replays only the remaining $N - K$ tail vectors into the in-memory graph.
+  3. This guarantees instant cold starts without sacrificing consistency.
+
+## 6. Filtered Search with Dynamic Over-Fetch
+Video retrieval frequently requires metadata filtering (e.g. searching only within a specific `video_id` or timestamp range).
+- **Post-Filtering with Over-Fetch**: The query engine queries HNSW for $k \times \text{overfetch}$ candidates (default overfetch factor $= 2$).
+- **Dynamic Expansion**: The filter predicate is evaluated against candidate keys. If fewer than $k$ matching candidates remain, the engine dynamically widens the overfetch factor or falls back to an exact scan over the filtered subset. This prevents graph navigation dead-ends while preserving 100% filter correctness.
+
+## 7. Background Rebuild & Vacuuming
+Deleting vectors from a proximity graph without breaking navigation paths is complex.
+- **Tombstoning**: Vectors are marked as deleted in the `DeleteBitmap` in $O(1)$ time. Search queries filter out tombstoned nodes during result gathering.
+- **Vacuum Trigger**: When the fraction of deleted nodes exceeds 20% (`DeletedFraction() >= 0.20`), PurpleDB triggers `RebuildIndex()`: active nodes are re-inserted into a clean graph, orphan connections are pruned, and a fresh snapshot is atomically committed.
+
+---
+
+## What You Should Understand Now (Milestone M6 Concepts)
+1. **Geometric Skip-List Principle**: How hierarchical layers of decreasing density provide logarithmic routing diameter ($O(\log N)$) through continuous high-dimensional vector spaces.
+2. **Beam Search vs Greedy Routing**: Why greedy 1-best routing is optimal for coarse upper-layer navigation, while multi-candidate beam search ($efSearch$) is required to achieve high recall on the dense base layer.
+3. **The Role of $M$ and $ef$ Hyperparameters**: How $M$ controls graph connectivity and memory consumption ($M$ edges per node), while $efConstruction$ and $efSearch$ trade build and query CPU time for nearest neighbor recall.
+4. **Snapshot Cold Restarts**: Why serializing graph topology with checksums avoids expensive graph re-indexing on process restart, and how tail replaying handles newly appended un-snapshotted vectors.
+5. **Over-Fetch for Post-Filtering**: How querying $2\times$ to $4\times$ candidates balances graph navigation efficiency against restrictive metadata predicates without modifying the graph topology.
+6. **Tombstone Vacuuming**: Why proximity graphs favor bitset tombstones for online deletes, followed by asynchronous vacuum rebuilds when tombstone density degrades navigation paths.
+7. **Recall@K Evaluation**: How to evaluate an approximate nearest neighbor index against an exact brute-force ground truth using set intersection over Top-$K$ results.
+
+
 
 

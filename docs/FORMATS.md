@@ -425,5 +425,61 @@ To separate large vector payloads from LSM compaction, the LSM store records lig
 | `'v'` (`0x76`) | `vector_id (Fixed64)`| `video_id:moment_id (String)` |
 | `'s'` (`0x73`) | `system:<name>` | System metadata (e.g. `next_vector_id`, `model_lock`) |
 
+---
+
+## 10. HNSW Graph Snapshot Format (Format Version 1)
+
+PurpleDB persists Hierarchical Navigable Small World (HNSW) proximity graphs as serialized snapshot files (`<dbname>/index.hnsw`) to enable sub-second cold database restarts without graph re-indexing.
+
+### 10.1 File Header (Fixed 64 Bytes)
+```
++--------------------+--------------------+--------------------+--------------------+
+| Magic Number (8 B) | Version (4 B u32)  | Dimension (4 B u32)| Metric (1 B u8)    |
+| 0xdb484e535731     | 1                  | e.g. 512           | 0=Cosine, 1=L2     |
++--------------------+--------------------+--------------------+--------------------+
+| M (2 B u16)        | Max M0 (2 B u16)   | efConstruction(4B) | Entry Point (8 B)  |
+| 16                 | 32                 | 200                | Node ID u64        |
++--------------------+--------------------+--------------------+--------------------+
+| Max Level (4 B u32)| Num Nodes (8 B u64)| Reserved (15 B)    | Header CRC (4 B)   |
+| Top graph layer    | Total graph nodes  | Zero padding       | Masked Castagnoli  |
++--------------------+--------------------+--------------------+--------------------+
+```
+- **Magic Number**: `0xdb484e535731ULL` (ASCII: `\xdb`, `'H'`, `'N'`, `'S'`, `'W'`, `'1'`).
+- **Format Version**: `1` (Fixed32).
+- **HNSW Parameters**:
+  - $M = 16$: Maximum outgoing edges per node on upper levels ($l \ge 1$).
+  - $M_0 = 32$: Maximum outgoing edges per node on ground level 0.
+  - $efConstruction = 200$: Beam search size during insertion.
+- **Entry Point**: The `VectorId` of the topmost node from which hierarchical search initiates.
+- **Header CRC-32C**: Masked Castagnoli CRC-32C over bytes 0..59 of the header.
+
+### 10.2 Node Adjacency Serialization
+Following the header, each node in the graph is serialized contiguously:
+```
++-----------------------------------+-----------------------------------+
+| Node ID (8 Bytes, Fixed64)        | Level (4 Bytes, Fixed32)          |
++-----------------------------------+-----------------------------------+
+| Layer 0 Degree (2 Bytes, Fixed16) | Layer 0 Neighbors (Degree * 8 B)  |
++-----------------------------------+-----------------------------------+
+| Layer 1 Degree (2 Bytes, Fixed16) | Layer 1 Neighbors (Degree * 8 B)  |
++-----------------------------------+-----------------------------------+
+| ...                               | ...                               |
++-----------------------------------+-----------------------------------+
+| Layer L Degree (2 Bytes, Fixed16) | Layer L Neighbors (Degree * 8 B)  |
++-----------------------------------+-----------------------------------+
+```
+- For every node, all neighbor links across all active levels $0 \le l \le \text{Level}$ are stored as 64-bit little-endian vector IDs.
+- Total graph edges are bounded by $M_0 + \text{Level} \times M$.
+
+### 10.3 Snapshot Footer
+Every `.hnsw` file concludes with a 4-byte masked Castagnoli CRC-32C checksum verifying the integrity of the entire node stream:
+```
++-------------------------------------------------------------+
+| Checksum: Masked Castagnoli CRC-32C (4 Bytes, Fixed32)      |
++-------------------------------------------------------------+
+```
+On cold open, `HNSW::LoadSnapshot()` verifies both the header checksum and the footer checksum. If either fails or if a torn write is detected, the database gracefully drops the snapshot and rebuilds the graph from the append-only `.vec` segments.
+
+
 
 

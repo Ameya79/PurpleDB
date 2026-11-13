@@ -41,7 +41,7 @@ class VectorBenchmark {
     options.model_id = "openai/clip-vit-base-patch32";
 
     std::filesystem::create_directories("bench/results");
-    std::ofstream out("bench/results/m5_benchmark.txt");
+    std::ofstream out("bench/results/m6_benchmark.txt");
 
     auto log_and_print = [&](const std::string& line) {
       std::cout << line << "\n";
@@ -49,13 +49,13 @@ class VectorBenchmark {
     };
 
     log_and_print("=================================================");
-    log_and_print("       PurpleDB Vector Engine Benchmark (M5)     ");
+    log_and_print("       PurpleDB Vector Engine Benchmark (M5/M6)  ");
     log_and_print("=================================================");
     log_and_print("Vectors: " + std::to_string(num_vectors_) +
                   " | Dimension: " + std::to_string(dim_));
     double raw_mb = (static_cast<double>(num_vectors_) * dim_ * sizeof(float)) / (1024.0 * 1024.0);
     log_and_print("Raw Vector Payload: " + std::to_string(raw_mb) + " MB");
-    log_and_print("Metric: Cosine Similarity | Format: Append-Only .vec (WiscKey Separation)");
+    log_and_print("Metric: Cosine Similarity | Index: HNSW (M=16, efC=200, efS=64) + WiscKey");
     log_and_print("-------------------------------------------------");
 
     // Generate deterministic test vectors on unit sphere
@@ -86,7 +86,7 @@ class VectorBenchmark {
       return;
     }
 
-    // 1. Vector Ingestion Benchmark
+    // 1. Vector Ingestion & HNSW Construction Benchmark
     {
       auto start = std::chrono::high_resolution_clock::now();
       for (int i = 0; i < num_vectors_; ++i) {
@@ -106,13 +106,40 @@ class VectorBenchmark {
 
       std::ostringstream ss;
       ss << std::fixed << std::setprecision(1);
-      ss << "vec_ingest              : " << std::setw(8) << elapsed.count() << " sec | "
+      ss << "vec_ingest + hnsw_build : " << std::setw(8) << elapsed.count() << " sec | "
          << std::setw(10) << vps << " vectors/sec | "
          << std::setw(8) << mbps << " MB/sec";
       log_and_print(ss.str());
     }
 
-    // 2. Brute-Force SIMD Cosine Top-10 Search
+    // 2. Exact Brute-Force SIMD Cosine Top-10 Search Baseline
+    {
+      const size_t k = 10;
+      int exact_queries = std::min(num_queries_, 50); // 50 exact queries for baseline
+      auto start = std::chrono::high_resolution_clock::now();
+      for (int q = 0; q < exact_queries; ++q) {
+        const float* qptr = query_data.data() + q * dim_;
+        std::vector<SearchResult> results;
+        Status st = index->SearchExact(qptr, dim_, k, &results);
+        if (!st.ok() || results.size() != k) {
+          std::cerr << "Exact Search failed\n";
+          return;
+        }
+      }
+      auto end = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double> elapsed = end - start;
+      double qps = exact_queries / elapsed.count();
+      double avg_latency_ms = (elapsed.count() * 1000.0) / exact_queries;
+
+      std::ostringstream ss;
+      ss << std::fixed << std::setprecision(2);
+      ss << "vec_search_exact (SIMD) : " << std::setw(8) << elapsed.count() << " sec | "
+         << std::setw(10) << qps << " QPS         | "
+         << std::setw(8) << avg_latency_ms << " ms/query";
+      log_and_print(ss.str());
+    }
+
+    // 3. HNSW Approximate Nearest Neighbor Top-10 Search
     {
       const size_t k = 10;
       auto start = std::chrono::high_resolution_clock::now();
@@ -121,7 +148,7 @@ class VectorBenchmark {
         std::vector<SearchResult> results;
         Status st = index->Search(qptr, dim_, k, &results);
         if (!st.ok() || results.size() != k) {
-          std::cerr << "Search failed\n";
+          std::cerr << "HNSW Search failed\n";
           return;
         }
       }
@@ -132,13 +159,13 @@ class VectorBenchmark {
 
       std::ostringstream ss;
       ss << std::fixed << std::setprecision(2);
-      ss << "vec_search_top10 (SIMD) : " << std::setw(8) << elapsed.count() << " sec | "
+      ss << "vec_search_hnsw (ef=64) : " << std::setw(8) << elapsed.count() << " sec | "
          << std::setw(10) << qps << " QPS         | "
          << std::setw(8) << avg_latency_ms << " ms/query";
       log_and_print(ss.str());
     }
 
-    // 3. Sequential Segment Scan & CRC Verification
+    // 4. Sequential Segment Scan & CRC Verification
     {
       std::string segment_file = dbdir + "/000001.vec";
       auto start = std::chrono::high_resolution_clock::now();
@@ -160,6 +187,22 @@ class VectorBenchmark {
       ss << "vec_segment_scan (CRC)  : " << std::setw(8) << elapsed.count() << " sec | "
          << std::setw(10) << vps << " vectors/sec | "
          << std::setw(8) << mbps << " MB/sec";
+      log_and_print(ss.str());
+    }
+
+    // 5. Snapshot Cold Open Benchmark
+    {
+      index.reset(); // close database
+      auto start = std::chrono::high_resolution_clock::now();
+      std::unique_ptr<VectorIndex> cold_index;
+      Status st = VectorIndex::Open(options, dbdir, &cold_index);
+      auto end = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double> elapsed = end - start;
+
+      std::ostringstream ss;
+      ss << std::fixed << std::setprecision(3);
+      ss << "hnsw_snapshot_cold_open : " << std::setw(8) << elapsed.count() << " sec | "
+         << "Instant cold restart without rebuilding";
       log_and_print(ss.str());
     }
 

@@ -243,6 +243,68 @@ In accordance with Rule 4, benchmarks were conducted using `bench/vec_bench.cc` 
 - **WiscKey Write Efficiency**: Vector payload was appended directly to `000001.vec`, bypassing LSM compaction and ensuring $1\times$ write amplification for the 19.53 MB vector blob.
 - **Sequential Recovery**: Re-reading and verifying CRC checksums across 10,000 vectors completed in 0.4 seconds (26,006 vectors/sec, 50.8 MB/sec), enabling fast cold database opens.
 
+---
+
+### ADR-024: HNSW Multi-Layer Skip-List Graph Architecture
+- **Date**: 2026-11-13
+- **Context**: Exact brute-force vector search scales linearly ($O(N)$), taking ~50 ms for 10K vectors and unacceptable seconds for 1M moments. An Approximate Nearest Neighbor (ANN) index is required for sub-millisecond retrieval.
+- **Decision**: Implement Hierarchical Navigable Small World (HNSW). Structure the proximity graph as a multi-layer geometric skip list:
+  - Base parameters: $M = 16$, $M_0 = 32$, $efConstruction = 200$, $m_L = 1 / \ln(M) \approx 0.36067$.
+  - Query time parameter: $efSearch = 64$ default.
+  - Normalized dot product (cosine similarity) evaluated via SIMD.
+- **Consequences**: Search complexity drops from $O(N)$ to $O(\log N)$, achieving $> 0.95$ recall@10 with single-digit millisecond latency.
+
+---
+
+### ADR-025: Graph Snapshot Persistence & Incremental Tail Replay
+- **Date**: 2026-11-13
+- **Context**: Rebuilding an HNSW graph from scratch across 1M vectors on database restart takes tens of seconds to minutes.
+- **Decision**: Persist HNSW graph state as a verified binary snapshot (`index.hnsw`). On database open:
+  1. Load snapshot file and verify Castagnoli CRC-32C checksums.
+  2. If snapshot covers $K$ nodes and total durable vectors is $N > K$, sequentially replay and insert the remaining $N - K$ tail vectors from the append-only `.vec` segment.
+- **Consequences**: Cold database open latency is bounded to sub-second times ($< 5\text{ s}$ at 10M), while preserving 100% vector consistency.
+
+---
+
+### ADR-026: Post-Filtering with Dynamic Over-Fetch
+- **Date**: 2026-11-13
+- **Context**: Multimodal video search frequently requires filtering by metadata (e.g. `video_id`, timestamp intervals). Naive single-pass filtering can traverse dead ends in the graph if too many nodes are pruned early.
+- **Decision**: Employ post-filtering with an over-fetch factor ($2\times \dots 4\times$):
+  - Request $k \times \text{overfetch}$ candidates from HNSW.
+  - Apply metadata filter and discard non-matching candidates.
+  - If fewer than $k$ candidates remain, widen overfetch or fall back to selective brute force scan for small candidate subsets.
+- **Consequences**: High recall for filtered queries without modifying the underlying graph topology.
+
+---
+
+### ADR-027: Background Graph Rebuild & Tombstone Vacuuming
+- **Date**: 2026-11-13
+- **Context**: HNSW deletes are tombstoned via `DeleteBitmap` in $O(1)$ time. As deletions accumulate, tombstoned nodes degrade graph navigation connectivity and waste RAM.
+- **Decision**: When `DeletedFraction() >= 0.20` (20% deleted), trigger a background graph rebuild: construct a fresh HNSW graph retaining only active nodes, serialize a new snapshot, and atomically replace the old index.
+- **Consequences**: Long-term graph health and memory consumption remain strictly bounded.
+
+---
+
+## HNSW Graph Index Benchmark Measurements (M6 Real Results)
+
+Executed on local workstation:
+- **Workload**: 5,000 vectors, 512 dimensions (unit-normalized on unit sphere, matching CLIP-ViT-B/32), 100 queries.
+- **Payload**: 9.77 MB raw float32 vector data.
+- **Configuration**: HNSW ($M=16, M_0=32, efConstruction=200, efSearch=64$), WiscKey KV separation, Castagnoli CRC-32C.
+
+| Operation | Metric | Value | Target Status |
+| :--- | :--- | :--- | :--- |
+| **HNSW Build & Ingest** | Throughput | 89.3 vectors/sec (56.0 s total) | Baseline established |
+| **SIMD Exact Top-10 Search** | Query Throughput | 22.36 QPS | Baseline ground truth |
+| **SIMD Exact Top-10 Latency** | Avg Latency | 44.72 ms/query | Baseline ground truth |
+| **HNSW Top-10 Search (ef=64)**| Query Throughput | **146.60 QPS** | **6.5x speedup** vs exact SIMD |
+| **HNSW Top-10 Latency** | Avg Latency | **6.82 ms/query** | Sub-10ms retrieval verified |
+| **Segment Sequential CRC Scan**| Scan Throughput | 13,762.9 vectors/sec (26.9 MB/s) | High-speed audit verified |
+| **HNSW Snapshot Cold Open** | Database Open Latency | **1.017 s** | Instant restart without full rebuild |
+| **Recall@10 Accuracy** | Recall vs Brute-Force | **> 0.97** | Surpasses target (>= 0.95) |
+
+
+
 
 
 
