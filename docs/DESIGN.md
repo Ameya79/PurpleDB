@@ -470,3 +470,69 @@ When a database reopens after a shutdown:
 7. **Append-Only Manifest Logging & Atomic CURRENT**: Why database engines never rewrite directory metadata in-place, and how WAL-backed manifests with atomic file renames guarantee crash-consistent state transitions.
 8. **Level 0 Overlapping File Semantics**: Why flushed L0 SSTables have overlapping key intervals and must be queried in reverse chronological order to satisfy snapshot visibility.
 
+---
+
+# PurpleDB Architecture & Design Rationale — Milestone M4
+
+This section documents the architectural principles behind **Milestone M4: Compaction, Bloom Filters, and Snapshots**.
+
+## 1. Block-Framed Bloom Filters & Double Hashing
+In an LSM storage engine, a query for a non-existent key must search the MemTable, immutable MemTable, and every level of the LSM tree before returning `NotFound`. Without filtering, each SSTable inspected requires fetching index and data blocks from disk.
+- **Bloom Filter Principle**: A space-efficient probabilistic data structure that can return false positives (saying a key *might* be present when it isn't), but **never false negatives** (if it says a key is absent, it is guaranteed not to exist).
+- **Block-Framed Filters (2 KiB Base)**: Rather than building one massive Bloom filter per SSTable, PurpleDB builds one filter per 2 KiB chunk of data blocks. Given a block offset $O$, the engine computes `index = O >> 11`, loads only that filter chunk, and tests the user key.
+- **Kirsch-Mitzenmacher Double Hashing**: Generating $k$ independent hashes normally requires $k$ hash functions. Kirsch and Mitzenmacher (2006) proved that two hash values $h_1$ and $h_2$ suffice to simulate $k$ independent hash functions without degrading asymptotic false-positive rates:
+  $$g_i = h_1 + i \times h_2 \pmod m$$
+  PurpleDB derives $h_1$ from MurmurHash2 and $h_2$ from bit rotation `(h >> 17) | (h << 15)`. At 10 bits/key and $k = 7$, the false positive rate is $< 1\%$.
+- **User Key vs Internal Key Indexing**: Bloom filters must index **user keys** rather than internal keys. Since users query user keys across arbitrary sequence numbers, indexing user keys enables single-check rejection regardless of snapshot visibility.
+
+## 2. K-Way MergingIterator
+In an LSM engine, data is partitioned across multiple sorted streams: active MemTable, immutable MemTable, Level 0 files, and Level 1..6 files.
+- **K-Way Merge**: `MergingIterator` provides a single sorted view over $K$ child iterators.
+- **Forward Traversal**: Moves the child with the smallest current key forward and repositions.
+- **Backward Traversal**: Locates the child with the largest current key and steps backwards.
+- **Direction Reversal**: When switching traversal directions (e.g. `Next()` followed by `Prev()`), child iterators must be repositioned to skip duplicate keys and maintain sorted invariants.
+
+## 3. Snapshot Isolation and User Sequence Visibility
+PurpleDB provides point-in-time Snapshot Isolation:
+- **Snapshot Implementation**: Snapshots are tracked in a circular doubly-linked list (`SnapshotList`). Each snapshot records a sequence number representing the maximum visible committed mutation at the moment it was acquired.
+- **Visibility Invariant**: A query or iterator assigned snapshot sequence number $S$ can see only internal keys with `sequence_number <= S`.
+- **`DBIter` Wrapper**: Wraps the internal `MergingIterator`. It skips versions newer than $S$, deduplicates older shadowed versions of the same user key, and transparently skips deletion tombstones (`kTypeDeletion`).
+- **RAII Table Lifetimes**: `TwoLevelIterator` retains a `std::shared_ptr<const Table>`, preventing active iterators from crashing if a concurrent background compaction deletes an underlying SSTable from the active VersionSet.
+
+## 4. Leveled Compaction Architecture
+Flushed Level 0 SSTables have overlapping key ranges, degrading read throughput if left unchecked.
+- **Leveled Hierarchy**: Levels 1 through 6 maintain **strictly disjoint, non-overlapping sorted files**. Candidate files can be located in $O(\log F)$ time via binary search, guaranteeing at most 1 table read per level.
+- **Compaction Picking**:
+  - Level 0 triggers compaction when `NumLevelFiles(0) >= 4`.
+  - Levels 1..5 trigger compaction when total bytes exceed level limits. Target capacity grows by $10\times$ per level (Level 1: 64 MB, Level 2: 640 MB, etc.).
+- **Atomic Manifest Updates**: Compaction outputs (chunked into 2 MiB files) and deleted input files are applied atomically to the `VersionSet` via a single `VersionEdit` written to `MANIFEST`.
+
+## 5. Tombstone Dropping Invariants
+A deletion tombstone cannot be dropped simply because it shadowed an older version during compaction. If an even older version of the key exists in a deeper level ($L+2 \dots 6$), dropping the tombstone would cause the older version to "resurrect" into visible reality.
+- **The Tombstone Dropping Rule**: A tombstone (`kTypeDeletion`) is physically discarded during compaction IF AND ONLY IF:
+  1. `seq <= smallest_snapshot`: No active snapshot can see the tombstone or any older version.
+  2. `Compaction::IsBaseLevelForKey(user_key)` is true: No level deeper than the compaction output level contains any file overlapping `user_key`.
+
+## 6. Write Throttling and Backpressure
+If write throughput exceeds compaction bandwidth, Level 0 files multiply, causing read amplification to skyrocket and exhausting OS file descriptors.
+- **Two-Stage Backpressure**:
+  - Soft slowdown at $\ge 8$ L0 files: Writer sleeps 1ms, yielding CPU slices to the compaction worker thread.
+  - Hard stall at $\ge 12$ L0 files: Writer suspends on a condition variable (`bg_cv_`) until background compaction reduces L0 files below 12.
+
+## 7. Orphan File Purging on Open
+System crashes or abrupt power loss during compaction or flushing can leave uncommitted `.sst`, `.dbtmp`, or `.log` files on disk.
+- On startup, after replaying the manifest to establish the live file set, PurpleDB sweeps the database directory and immediately unlinks any SSTables not referenced in the active `VersionSet`, purging orphaned disk remnants before serving queries.
+
+---
+
+## What You Should Understand Now (Milestone M4 Concepts)
+1. **Kirsch-Mitzenmacher Double Hashing**: How two independent hash values ($h_1, h_2$) simulate $k$ distinct hash functions ($g_i = h_1 + i \cdot h_2$), eliminating hash computation overhead while preserving the optimal Bloom filter false-positive curve.
+2. **Block-Framed Bloom Filters**: Why grouping filters by 2 KiB data block offsets bounds filter loading overhead and enables negative point lookup rejection without decoding data blocks.
+3. **K-Way Merge Iteration**: How multi-stream iterators coordinate forward and backward traversal across disjoint and overlapping inputs, and how direction switching is handled.
+4. **Snapshot Isolation & Sequence Visibility**: How integer sequence numbers attached to internal keys implement multi-version concurrency control (MVCC) without table-level read locking.
+5. **Leveled Compaction & Geometric Sizing**: Why non-overlapping key ranges at Levels 1..6 bound read amplification to $O(\log F)$ per level, and how $10\times$ level capacity scaling balances write amplification against space amplification.
+6. **Tombstone Dropping Invariants**: Why tombstones can only be safely discarded when `seq <= smallest_snapshot` AND no deeper level contains overlapping key ranges, preventing data resurrection bugs.
+7. **Write Backpressure & Two-Tier Throttling**: Why high-throughput LSM engines use soft sleep slowdowns followed by hard condition-variable stalls to prevent write storms from overwhelming compaction threads.
+8. **Crash-Safe Orphan Purging**: How manifest-driven file set recovery identifies and unlinks abandoned crash artifacts on database startup.
+
+

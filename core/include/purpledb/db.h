@@ -5,6 +5,8 @@
 #include <string>
 #include "core/storage/cache.h"
 #include "core/storage/env.h"
+#include "purpledb/filter_policy.h"
+#include "purpledb/iterator.h"
 #include "purpledb/slice.h"
 #include "purpledb/status.h"
 #include "purpledb/write_batch.h"
@@ -34,6 +36,16 @@ struct Options {
   // Control block cache (holds uncompressed blocks in memory).
   // If nullptr, PurpleDB will automatically create a default 8 MiB cache.
   std::shared_ptr<Cache> block_cache{nullptr};
+
+  // Filter policy to use for fast Bloom filter rejection checks on point reads.
+  // Default: nullptr (no filter). If set (e.g. NewBloomFilterPolicy(10)),
+  // SSTables generate Bloom filters to avoid reading blocks for missing keys.
+  const FilterPolicy* filter_policy{nullptr};
+};
+
+class Snapshot {
+ public:
+  virtual ~Snapshot() = default;
 };
 
 struct WriteOptions {
@@ -45,8 +57,9 @@ struct ReadOptions {
   // Verify checksums on records read from storage.
   bool verify_checksums{true};
 
-  // Sequence number to read at (0 means newest committed version).
-  SequenceNumber snapshot{0};
+  // If nullptr, read at the newest committed version. If non-null, read at
+  // the point-in-time state of the specified snapshot.
+  const Snapshot* snapshot{nullptr};
 };
 
 /**
@@ -78,6 +91,15 @@ class DB {
 
   // Retrieve the value for "key". Returns NotFound if key does not exist.
   virtual Status Get(const ReadOptions& options, const Slice& key, std::string* value) = 0;
+
+  // Return a point-in-time snapshot of the database.
+  virtual const Snapshot* GetSnapshot() = 0;
+
+  // Release a previously acquired snapshot.
+  virtual void ReleaseSnapshot(const Snapshot* snapshot) = 0;
+
+  // Return an iterator over the contents of the database.
+  virtual std::unique_ptr<Iterator> NewIterator(const ReadOptions& options) = 0;
 
   // Convenience overloads with default options
   Status Put(const Slice& key, const Slice& value) {

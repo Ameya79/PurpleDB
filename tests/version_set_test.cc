@@ -85,5 +85,64 @@ TEST(VersionSetTest, ManifestLogAndRecover) {
   env->DeleteDir(dbdir);
 }
 
+TEST(VersionSetTest, LevelOrderingAndCompactionPicker) {
+  Env* env = Env::Default();
+  std::string dbdir = "test_version_levels";
+  env->DeleteDir(dbdir);
+  ASSERT_STATUS_OK(env->CreateDirIfMissing(dbdir));
+
+  {
+    VersionSet vset(dbdir, env);
+
+    // 1. Add files to Level 1 in unsorted order: [i, z], [a, d], [e, h]
+    VersionEdit edit;
+    edit.AddFile(1, 101, 1000, Slice("i\0\0\0\0\0\0\0\1", 9), Slice("z\0\0\0\0\0\0\0\1", 9));
+    edit.AddFile(1, 102, 2000, Slice("a\0\0\0\0\0\0\0\1", 9), Slice("d\0\0\0\0\0\0\0\1", 9));
+    edit.AddFile(1, 103, 3000, Slice("e\0\0\0\0\0\0\0\1", 9), Slice("h\0\0\0\0\0\0\0\1", 9));
+    ASSERT_STATUS_OK(vset.LogAndApply(&edit));
+
+    // Verify L1 files are automatically sorted by smallest key: [a, d], [e, h], [i, z]
+    const auto& l1 = vset.current()->files(1);
+    ASSERT_EQ(l1.size(), 3u);
+    ASSERT_EQ(l1[0].number, 102u);  // [a, d]
+    ASSERT_EQ(l1[1].number, 103u);  // [e, h]
+    ASSERT_EQ(l1[2].number, 101u);  // [i, z]
+
+    ASSERT_EQ(vset.current()->TotalBytes(1), 6000u);
+
+    // 2. Overlapping inputs
+    std::vector<FileMetaData> overlaps;
+    // [b, f] should overlap with [a, d] (file 102) and [e, h] (file 103)
+    vset.current()->GetOverlappingInputs(1, Slice("b"), Slice("f"), &overlaps);
+    ASSERT_EQ(overlaps.size(), 2u);
+    ASSERT_EQ(overlaps[0].number, 102u);
+    ASSERT_EQ(overlaps[1].number, 103u);
+
+    // [j, k] should overlap only with [i, z] (file 101)
+    vset.current()->GetOverlappingInputs(1, Slice("j"), Slice("k"), &overlaps);
+    ASSERT_EQ(overlaps.size(), 1u);
+    ASSERT_EQ(overlaps[0].number, 101u);
+
+    // [0, 9] should overlap with no files
+    vset.current()->GetOverlappingInputs(1, Slice("0"), Slice("9"), &overlaps);
+    ASSERT_EQ(overlaps.size(), 0u);
+
+    // 3. Compaction picker
+    // Currently 0 files in L0, and 6000 bytes in L1 (< 64 MB). No compaction needed.
+    ASSERT_EQ(vset.PickCompactionLevel(), -1);
+
+    // Add 4 files to L0 -> triggers Level 0 compaction!
+    VersionEdit edit_l0;
+    edit_l0.AddFile(0, 201, 100, Slice("k1"), Slice("k2"));
+    edit_l0.AddFile(0, 202, 100, Slice("k1"), Slice("k2"));
+    edit_l0.AddFile(0, 203, 100, Slice("k1"), Slice("k2"));
+    edit_l0.AddFile(0, 204, 100, Slice("k1"), Slice("k2"));
+    ASSERT_STATUS_OK(vset.LogAndApply(&edit_l0));
+    ASSERT_EQ(vset.PickCompactionLevel(), 0);
+  }
+
+  env->DeleteDir(dbdir);
+}
+
 }  // namespace purpledb
 

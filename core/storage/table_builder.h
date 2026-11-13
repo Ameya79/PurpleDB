@@ -6,7 +6,9 @@
 #include "core/storage/block.h"
 #include "core/storage/block_builder.h"
 #include "core/storage/env.h"
+#include "core/storage/filter_block.h"
 #include "core/storage/format.h"
+#include "purpledb/filter_policy.h"
 #include "purpledb/slice.h"
 #include "purpledb/status.h"
 
@@ -16,6 +18,7 @@ struct TableBuilderOptions {
   size_t block_size{4096};
   int block_restart_interval{16};
   const Block::Comparator* comparator{nullptr};
+  const FilterPolicy* filter_policy{nullptr};
 };
 
 /**
@@ -69,6 +72,7 @@ class TableBuilder {
   Status status_;
   BlockBuilder data_block_;
   BlockBuilder index_block_;
+  std::unique_ptr<FilterBlockBuilder> filter_block_;
   std::string last_key_;
   uint64_t num_entries_{0};
   bool closed_{false};

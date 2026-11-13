@@ -175,4 +175,65 @@ TEST(TableTest, CorruptionDetection) {
   env->DeleteFile(fname);
 }
 
+TEST(TableTest, BloomFilterNegativeLookupAndInternalGet) {
+  Env* env = Env::Default();
+  std::string fname = "test_bloom_table.sst";
+  std::unique_ptr<WritableFile> wfile;
+  ASSERT_STATUS_OK(env->NewWritableFile(fname, &wfile));
+
+  auto policy = NewBloomFilterPolicy(10);
+  TableBuilderOptions opts;
+  opts.block_size = 512;
+  opts.filter_policy = policy.get();
+  TableBuilder builder(opts, wfile.get());
+
+  const int N = 200;
+  for (int i = 0; i < N; ++i) {
+    char kbuf[32], vbuf[64];
+    std::snprintf(kbuf, sizeof(kbuf), "k%05d", i);
+    std::snprintf(vbuf, sizeof(vbuf), "val_%05d", i);
+    builder.Add(Slice(kbuf), Slice(vbuf));
+  }
+
+  ASSERT_STATUS_OK(builder.Finish());
+  ASSERT_STATUS_OK(wfile->Close());
+
+  uint64_t fsize = 0;
+  ASSERT_STATUS_OK(env->GetFileSize(fname, &fsize));
+
+  // 1. Open with filter policy
+  std::unique_ptr<RandomAccessFile> rfile;
+  ASSERT_STATUS_OK(env->NewRandomAccessFile(fname, &rfile));
+  std::unique_ptr<Table> table;
+  ASSERT_STATUS_OK(Table::Open(std::move(rfile), fsize, &table, policy.get()));
+
+  ASSERT_TRUE(table->filter_reader() != nullptr);
+
+  // 2. Positive lookups via InternalGet
+  for (int i = 0; i < N; ++i) {
+    char kbuf[32], vbuf[64];
+    std::snprintf(kbuf, sizeof(kbuf), "k%05d", i);
+    std::snprintf(vbuf, sizeof(vbuf), "val_%05d", i);
+    std::string val;
+    Status s;
+    bool found = table->InternalGet(Slice(kbuf), nullptr, &val, &s);
+    ASSERT_TRUE(found);
+    ASSERT_STATUS_OK(s);
+    ASSERT_EQ(val, std::string(vbuf));
+  }
+
+  // 3. Negative lookups via InternalGet
+  for (int i = 0; i < N; ++i) {
+    char kbuf[32];
+    std::snprintf(kbuf, sizeof(kbuf), "missing_%05d", i);
+    std::string val;
+    Status s;
+    bool found = table->InternalGet(Slice(kbuf), nullptr, &val, &s);
+    ASSERT_FALSE(found);
+  }
+
+  table.reset();
+  env->DeleteFile(fname);
+}
+
 }  // namespace purpledb

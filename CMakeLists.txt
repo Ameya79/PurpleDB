@@ -50,12 +50,17 @@ set(PURPLEDB_CORE_SOURCES
   core/storage/block.cc
   core/storage/block_builder.cc
   core/storage/cache.cc
+  core/storage/compaction.cc
   core/storage/crc32c.cc
   core/storage/db_impl.cc
+  core/storage/db_iter.cc
   core/storage/env.cc
   core/storage/filename.cc
+  core/storage/filter_block.cc
+  core/storage/filter_policy.cc
   core/storage/format.cc
   core/storage/memtable.cc
+  core/storage/merger.cc
   core/storage/table.cc
   core/storage/table_builder.cc
   core/storage/version_edit.cc
@@ -65,6 +70,7 @@ set(PURPLEDB_CORE_SOURCES
   core/storage/write_batch.cc
   core/util/arena.cc
   core/util/coding.cc
+  core/util/hash.cc
   core/util/iterator.cc
   core/util/logging.cc
   core/util/slice.cc
@@ -93,8 +99,11 @@ set(PURPLEDB_TEST_SOURCES
   tests/arena_test.cc
   tests/skiplist_test.cc
   tests/block_test.cc
+  tests/merger_test.cc
   tests/table_test.cc
   tests/cache_test.cc
+  tests/compaction_test.cc
+  tests/filter_test.cc
   tests/version_set_test.cc
   tests/env_test.cc
   tests/wal_test.cc
@@ -103,6 +112,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/db_test.cc
   tests/m2_acceptance_test.cc
   tests/m3_acceptance_test.cc
+  tests/m4_acceptance_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})

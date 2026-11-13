@@ -68,5 +68,62 @@ Status SetCurrentFile(Env* env, const std::string& dbname, uint64_t manifest_num
   return s;
 }
 
+bool ParseFileName(const std::string& filename, uint64_t* number, FileType* type) {
+  // Strip any leading directories
+  std::string base = filename;
+  size_t last_slash = base.find_last_of("/\\");
+  if (last_slash != std::string::npos) {
+    base = base.substr(last_slash + 1);
+  }
+
+  if (base == "CURRENT") {
+    *number = 0;
+    *type = kCurrentFile;
+    return true;
+  }
+
+  if (base.rfind("MANIFEST-", 0) == 0) {
+    try {
+      *number = std::stoull(base.substr(9));
+      *type = kDescriptorFile;
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  if (base.size() > 4 && base.substr(base.size() - 4) == ".sst") {
+    try {
+      *number = std::stoull(base.substr(0, base.size() - 4));
+      *type = kTableFile;
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  if (base.size() > 4 && base.substr(base.size() - 4) == ".log") {
+    try {
+      *number = std::stoull(base.substr(0, base.size() - 4));
+      *type = kLogFile;
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  if (base.size() > 6 && base.substr(base.size() - 6) == ".dbtmp") {
+    try {
+      *number = std::stoull(base.substr(0, base.size() - 6));
+      *type = kTempFile;
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 }  // namespace purpledb
 

@@ -1,4 +1,5 @@
 #include "purpledb/db.h"
+#include "purpledb/filter_policy.h"
 #include "core/storage/env.h"
 
 #include <chrono>
@@ -28,9 +29,11 @@ class Benchmark {
     options.create_if_missing = true;
     options.write_buffer_size = 4 * 1024 * 1024;  // 4 MiB
     options.block_size = 4096;
+    auto filter = NewBloomFilterPolicy(10);
+    options.filter_policy = filter.get();
 
     std::filesystem::create_directories("bench/results");
-    std::ofstream out("bench/results/m3_benchmark.txt");
+    std::ofstream out("bench/results/m4_benchmark.txt");
 
     auto log_and_print = [&](const std::string& line) {
       std::cout << line << "\n";
@@ -38,11 +41,11 @@ class Benchmark {
     };
 
     log_and_print("=================================================");
-    log_and_print("       PurpleDB Storage Engine Benchmark (M3)    ");
+    log_and_print("       PurpleDB Storage Engine Benchmark (M4)    ");
     log_and_print("=================================================");
     log_and_print("Keys: " + std::to_string(num_keys_) + " | Value Size: " +
                   std::to_string(value_size_) + " bytes");
-    log_and_print("Write Buffer Size: 4 MiB | Block Size: 4 KiB");
+    log_and_print("Write Buffer Size: 4 MiB | Block Size: 4 KiB | Bloom: 10 bits/key");
     log_and_print("-------------------------------------------------");
 
     std::unique_ptr<DB> db;
@@ -119,6 +122,30 @@ class Benchmark {
       char buf[128];
       std::snprintf(buf, sizeof(buf), "fillrandom : %10.1f ops/sec | %6.2f MB/sec (%.3f s)",
                     ops_per_sec, mb_per_sec, sec.count());
+      log_and_print(buf);
+    }
+
+    // 4. Missing Point Read (readmissing - Bloom Filter Negative Lookup)
+    {
+      std::string val;
+      auto start = std::chrono::high_resolution_clock::now();
+      int found = 0;
+      for (int i = 0; i < num_keys_; ++i) {
+        char kbuf[32];
+        std::snprintf(kbuf, sizeof(kbuf), "missing_%08d", i);
+        if (db->Get(Slice(kbuf), &val).ok()) {
+          found++;
+        }
+      }
+      auto end = std::chrono::high_resolution_clock::now();
+      std::chrono::duration<double> sec = end - start;
+      double ops_per_sec = num_keys_ / sec.count();
+      double mb_per_sec = (static_cast<double>(num_keys_) * (16 + value_size_)) /
+                          (sec.count() * 1024 * 1024);
+
+      char buf[128];
+      std::snprintf(buf, sizeof(buf), "readmissing: %10.1f ops/sec | %6.2f MB/sec (found %d/%d - filter rejected %d)",
+                    ops_per_sec, mb_per_sec, found, num_keys_, num_keys_ - found);
       log_and_print(buf);
     }
 

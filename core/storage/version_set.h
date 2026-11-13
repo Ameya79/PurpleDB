@@ -14,6 +14,8 @@
 
 namespace purpledb {
 
+struct Options;
+class Compaction;
 class VersionSet;
 
 static const int kNumLevels = 7;
@@ -51,6 +53,17 @@ class Version {
   // Number of files in Level 0.
   size_t NumLevelFiles(int level) const { return files_[level].size(); }
 
+  // Total byte size of all files in a level.
+  uint64_t TotalBytes(int level) const;
+
+  // Find all files in "level" whose key range overlaps [smallest_user, largest_user].
+  void GetOverlappingInputs(int level, const Slice& smallest_user,
+                           const Slice& largest_user,
+                           std::vector<FileMetaData>* inputs) const;
+
+  // Add child iterators for all files across all levels to *iters.
+  void AddIterators(std::vector<std::unique_ptr<Iterator>>* iters);
+
  private:
   friend class VersionSet;
   friend class VersionBuilder;
@@ -68,7 +81,7 @@ class Version {
  */
 class VersionSet {
  public:
-  VersionSet(std::string dbname, Env* env);
+  VersionSet(std::string dbname, Env* env, const Options* options = nullptr);
   ~VersionSet();
 
   VersionSet(const VersionSet&) = delete;
@@ -82,6 +95,8 @@ class VersionSet {
 
   // Current version. Caller does not take ownership.
   Version* current() const { return current_; }
+
+  const Options* options() const { return options_; }
 
   uint64_t ManifestFileNumber() const { return manifest_file_number_; }
   uint64_t NextFileNumber() const { return next_file_number_; }
@@ -97,6 +112,19 @@ class VersionSet {
   uint64_t LogNumber() const { return log_number_; }
   uint64_t PrevLogNumber() const { return prev_log_number_; }
 
+  size_t NumLevelFiles(int level) const {
+    return current_ ? current_->NumLevelFiles(level) : 0;
+  }
+
+  // Returns the level most in need of compaction, or -1 if no level needs compaction.
+  int PickCompactionLevel() const;
+
+  // Constructs a Compaction job for the level returned by PickCompactionLevel().
+  std::unique_ptr<Compaction> PickCompaction();
+
+  // Maximum allowed bytes for a given level before compaction is triggered.
+  double MaxBytesForLevel(int level) const;
+
   // Open an SSTable for reading.
   Status GetTable(uint64_t file_number, uint64_t file_size,
                   std::unique_ptr<Table>* table) const;
@@ -108,6 +136,7 @@ class VersionSet {
 
   std::string dbname_;
   Env* env_;
+  const Options* options_{nullptr};
   uint64_t next_file_number_{1};
   uint64_t manifest_file_number_{0};
   uint64_t last_sequence_{0};
