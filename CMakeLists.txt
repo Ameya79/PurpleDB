@@ -81,6 +81,7 @@ set(PURPLEDB_CORE_SOURCES
   core/util/hash.cc
   core/util/iterator.cc
   core/util/logging.cc
+  core/util/sha256.cc
   core/util/slice.cc
   core/util/status.cc
 )
@@ -129,6 +130,7 @@ set(PURPLEDB_TEST_SOURCES
   tests/hnsw_test.cc
   tests/m6_acceptance_test.cc
   tests/embedder_test.cc
+  tests/sha256_test.cc
 )
 
 add_executable(purpledb_tests ${PURPLEDB_TEST_SOURCES})
