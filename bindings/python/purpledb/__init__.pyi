@@ -133,3 +133,4 @@ def open(
     hnsw_ef_search: int = ...,
     fps: float = ...,
 ) -> PurpleDB: ...
+

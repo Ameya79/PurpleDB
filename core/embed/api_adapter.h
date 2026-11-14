@@ -2,11 +2,13 @@
 
 #include "core/embed/embedder.h"
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace purpledb {

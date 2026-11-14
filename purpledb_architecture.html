@@ -1,0 +1,1712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PurpleDB: The Visual, First-Principles Architecture Guide</title>
+  <style>
+    :root {
+      --bg-page: #f8fafc;
+      --bg-card: #ffffff;
+      --bg-card-alt: #f1f5f9;
+      --border-color: #e2e8f0;
+      --border-focus: #cbd5e1;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --text-light: #64748b;
+      --brand-purple: #7c3aed;
+      --brand-purple-light: #ede9fe;
+      --brand-purple-dark: #5b21b6;
+      --brand-indigo: #4f46e5;
+      --brand-blue: #0284c7;
+      --brand-green: #059669;
+      --brand-amber: #d97706;
+      --brand-rose: #e11d48;
+      --code-bg: #0f172a;
+      --code-text: #f8fafc;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+      --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      line-height: 1.65;
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Top Sticky Navigation */
+    .top-nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0.75rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: var(--shadow-sm);
+    }
+    .top-nav .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 1.15rem;
+      color: var(--brand-purple);
+      text-decoration: none;
+    }
+    .nav-links {
+      display: flex;
+      gap: 1.25rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.15s ease;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+    }
+    .nav-links a:hover {
+      color: var(--brand-purple);
+      background: var(--brand-purple-light);
+    }
+
+    /* Reading Progress Bar */
+    .progress-bar-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      z-index: 101;
+      background: transparent;
+    }
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--brand-purple), var(--brand-indigo));
+      transition: width 0.1s ease-out;
+    }
+
+    /* Layout Container */
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2.5rem 1.5rem 6rem;
+    }
+
+    /* Hero Section */
+    .hero {
+      text-align: center;
+      padding: 3.5rem 1rem 3rem;
+      background: linear-gradient(180deg, #ffffff 0%, var(--bg-page) 100%);
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 3.5rem;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--brand-purple-light);
+      color: var(--brand-purple-dark);
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 1.25rem;
+      border: 1px solid #ddd6fe;
+    }
+    .hero h1 {
+      font-size: 2.85rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 1rem;
+      color: #0f172a;
+    }
+    .hero h1 span {
+      background: linear-gradient(135deg, var(--brand-purple), var(--brand-indigo));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p.lead {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 760px;
+      margin: 0 auto 2rem;
+      font-weight: 400;
+    }
+    .hero-stats {
+      display: flex;
+      justify-content: center;
+      gap: 2.5rem;
+      margin-top: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .hero-stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 1rem 1.5rem;
+      box-shadow: var(--shadow-sm);
+      text-align: center;
+      min-width: 160px;
+    }
+    .hero-stat-val {
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--brand-purple);
+    }
+    .hero-stat-lbl {
+      font-size: 0.8rem;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+
+    /* Section Cards */
+    .chapter {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 2.75rem 2.5rem;
+      margin-bottom: 3.5rem;
+      box-shadow: var(--shadow-md);
+      scroll-margin-top: 5rem;
+    }
+    .chapter-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 1.5rem;
+      border-bottom: 2px solid var(--border-color);
+      padding-bottom: 1rem;
+    }
+    .chapter-num {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--brand-purple);
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.25rem;
+      flex-shrink: 0;
+    }
+    .chapter-title {
+      font-size: 1.85rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+    }
+    .chapter-subtitle {
+      font-size: 1rem;
+      color: var(--text-muted);
+      font-weight: 400;
+      margin-top: 2px;
+    }
+
+    /* Callout & Analogy Boxes */
+    .analogy-box {
+      background: #faf5ff;
+      border: 1px solid #e9d5ff;
+      border-left: 5px solid var(--brand-purple);
+      border-radius: var(--radius-md);
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+    }
+    .analogy-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      color: var(--brand-purple-dark);
+      font-size: 1.05rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .key-concept-box {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-left: 5px solid var(--brand-green);
+      border-radius: var(--radius-md);
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+    }
+    .key-concept-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      color: #166534;
+      font-size: 1.05rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .warning-box {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-left: 5px solid var(--brand-amber);
+      border-radius: var(--radius-md);
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+    }
+    .warning-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      color: #92400e;
+      font-size: 1.05rem;
+      margin-bottom: 0.5rem;
+    }
+
+    /* Interactive Simulators */
+    .simulator-container {
+      background: #ffffff;
+      border: 2px solid #e2e8f0;
+      border-radius: var(--radius-lg);
+      padding: 1.75rem;
+      margin: 2rem 0;
+      box-shadow: var(--shadow-sm);
+    }
+    .simulator-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1.25rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border-color);
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .simulator-title {
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sim-badge {
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .simulator-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .sim-btn {
+      background: var(--brand-purple);
+      color: #ffffff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .sim-btn:hover {
+      background: var(--brand-purple-dark);
+      transform: translateY(-1px);
+    }
+    .sim-btn.secondary {
+      background: #f1f5f9;
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+    }
+    .sim-btn.secondary:hover {
+      background: #e2e8f0;
+    }
+
+    .simulator-canvas {
+      min-height: 220px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background: #f8fafc;
+      border: 1px dashed var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 1.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .sim-step-explanation {
+      margin-top: 1.25rem;
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      padding: 1rem 1.25rem;
+      font-size: 0.95rem;
+      color: var(--text-muted);
+    }
+
+    /* Memory Blocks Visualization */
+    .memory-grid {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+      width: 100%;
+    }
+    .memory-cell {
+      background: #ffffff;
+      border: 2px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      width: 120px;
+      padding: 10px;
+      text-align: center;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.3s ease;
+      position: relative;
+    }
+    .memory-cell.active {
+      border-color: var(--brand-purple);
+      background: #faf5ff;
+      transform: scale(1.05);
+      box-shadow: var(--shadow-md);
+    }
+    .memory-cell.heap {
+      border-color: var(--brand-amber);
+      background: #fffbeb;
+    }
+    .memory-cell-addr {
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: var(--text-light);
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 4px;
+      margin-bottom: 6px;
+    }
+    .memory-cell-name {
+      font-weight: 700;
+      font-size: 0.85rem;
+      color: var(--text-main);
+    }
+    .memory-cell-val {
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: var(--brand-purple-dark);
+      margin-top: 4px;
+      word-break: break-all;
+    }
+
+    /* Diagram Styles */
+    .diagram-wrapper {
+      margin: 2rem 0;
+      background: #ffffff;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-sm);
+      text-align: center;
+    }
+    .diagram-wrapper svg {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      margin: 0 auto;
+    }
+    .diagram-caption {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      color: var(--text-light);
+      font-style: italic;
+    }
+
+    /* Code Blocks */
+    .code-block {
+      background: var(--code-bg);
+      color: var(--code-text);
+      border-radius: var(--radius-md);
+      padding: 1.25rem 1.5rem;
+      margin: 1.5rem 0;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.9rem;
+      line-height: 1.6;
+      border: 1px solid #334155;
+    }
+    .code-block .comment { color: #94a3b8; font-style: italic; }
+    .code-block .keyword { color: #c084fc; font-weight: 600; }
+    .code-block .type { color: #38bdf8; font-weight: 600; }
+    .code-block .string { color: #4ade80; }
+    .code-block .func { color: #fbbf24; }
+    .code-block .num { color: #f472b6; }
+
+    /* File Mapping Cards */
+    .file-map-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+      gap: 16px;
+      margin: 1.5rem 0;
+    }
+    .file-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 1.25rem;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .file-card:hover {
+      border-color: var(--brand-purple);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+    .file-card-path {
+      font-family: monospace;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--brand-purple-dark);
+      word-break: break-all;
+      margin-bottom: 6px;
+    }
+    .file-card-desc {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .file-card-tag {
+      align-self: flex-start;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: var(--bg-card-alt);
+      color: var(--text-light);
+    }
+
+    /* Speed Comparison Table */
+    .speed-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+    .speed-table th, .speed-table td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-color);
+    }
+    .speed-table th {
+      background: #f1f5f9;
+      font-weight: 700;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .speed-table tr:hover {
+      background: #f8fafc;
+    }
+    .speed-table .badge-fast {
+      background: #dcfce7;
+      color: #15803d;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 0.8rem;
+    }
+    .speed-table .badge-slow {
+      background: #fee2e2;
+      color: #b91c1c;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 0.8rem;
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--text-light);
+      font-size: 0.9rem;
+      border-top: 1px solid var(--border-color);
+      background: #ffffff;
+      margin-top: 4rem;
+    }
+
+    @media (max-width: 768px) {
+      .container { padding: 1.5rem 1rem 4rem; }
+      .chapter { padding: 1.75rem 1.25rem; }
+      .hero h1 { font-size: 2.1rem; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Reading Progress Bar -->
+  <div class="progress-bar-container">
+    <div class="progress-bar" id="progressBar"></div>
+  </div>
+
+  <!-- Top Navigation -->
+  <nav class="top-nav">
+    <a href="#" class="brand">
+      <svg width="24" height="24" viewBox="0 0 100 100" fill="none">
+        <path d="M50 10C27.9 10 10 27.9 10 50C10 72.1 27.9 90 50 90C65 90 77.8 81.9 84.6 70C75 75 60 70 52 60C44 50 48 35 60 30C70 25 80 32 85 40C88.2 30 80 10 50 10Z" fill="url(#brandGrad)"/>
+        <circle cx="50" cy="45" r="5" fill="#ffffff"/>
+        <defs>
+          <linearGradient id="brandGrad" x1="10" y1="10" x2="90" y2="90">
+            <stop stop-color="#7c3aed"/>
+            <stop offset="1" stop-color="#4f46e5"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      PurpleDB Architecture
+    </a>
+    <div class="nav-links">
+      <a href="#ch0-why">0. Why PurpleDB</a>
+      <a href="#ch1-hardware">1. Computer Hardware</a>
+      <a href="#ch2-cpp">2. C++ From Scratch</a>
+      <a href="#ch3-vectors">3. Meaning as Vectors</a>
+      <a href="#ch4-pipeline">4. Video Pipeline</a>
+      <a href="#ch5-storage">5. Storage & LSM</a>
+      <a href="#ch6-wisckey">6. WiscKey & HNSW</a>
+      <a href="#ch7-codebase">7. Codebase Map</a>
+    </div>
+  </nav>
+
+  <!-- Hero Header -->
+  <header class="hero">
+    <div class="hero-badge">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+      First-Principles Visual Architecture Guide
+    </div>
+    <h1>Everything About <span>PurpleDB</span><br>Explained From Absolute Scratch</h1>
+    <p class="lead">
+      Assuming zero prior knowledge of C++, zero database theory, and zero math jargon.
+      Discover how computers physically store data, how videos become mathematical meaning, and how PurpleDB searches hours of video in 6 milliseconds.
+    </p>
+
+    <div class="hero-stats">
+      <div class="hero-stat-card">
+        <div class="hero-stat-val">336,000</div>
+        <div class="hero-stat-lbl">Reads / Second</div>
+      </div>
+      <div class="hero-stat-card">
+        <div class="hero-stat-val">6.8 ms</div>
+        <div class="hero-stat-lbl">Video Search Time</div>
+      </div>
+      <div class="hero-stat-card">
+        <div class="hero-stat-val">0</div>
+        <div class="hero-stat-lbl">External Daemons</div>
+      </div>
+      <div class="hero-stat-card">
+        <div class="hero-stat-val">1 Binary</div>
+        <div class="hero-stat-lbl">Embedded In-Process</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- CHAPTER 0: THE PROBLEM -->
+    <section class="chapter" id="ch0-why">
+      <div class="chapter-header">
+        <div class="chapter-num">0</div>
+        <div>
+          <h2 class="chapter-title">The Problem: Why Does PurpleDB Exist?</h2>
+          <div class="chapter-subtitle">The nightmare of searching video by meaning with traditional tools</div>
+        </div>
+      </div>
+
+      <p>
+        Imagine you have 1,000 hours of family videos, drone footage, or security recordings.
+        You want to type: <strong>"a golden retriever puppy catching a frisbee on the beach"</strong> and immediately jump to the exact 5 seconds where that happened.
+      </p>
+
+      <div class="analogy-box">
+        <div class="analogy-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          Why Text Databases (like SQL) Fail at Video Search
+        </div>
+        <p>
+          A relational database like MySQL or SQLite can only search exact text letters. If a file is named <code>VID_20261114_0042.mp4</code>, SQL knows nothing about what is inside. It cannot "see" the puppy, the sand, or the frisbee.
+          Traditional search engines look for words; but video is an avalanche of millions of colored pixels changing 30 times every second.
+        </p>
+      </div>
+
+      <h3 style="margin: 2rem 0 1rem; font-size: 1.35rem;">How People Tried to Solve This (And Why It Sucks)</h3>
+      <p>
+        Before PurpleDB, if a company or developer wanted to search videos, they had to stitch together five completely separate, fragile software tools:
+      </p>
+
+      <!-- DIAGRAM 1: The Old Broken Pipeline vs PurpleDB -->
+      <div class="diagram-wrapper">
+        <svg viewBox="0 0 900 360" width="100%" height="auto">
+          <!-- Background Split -->
+          <rect x="10" y="10" width="880" height="150" rx="12" fill="#fee2e2" stroke="#fca5a5" stroke-width="2"/>
+          <text x="30" y="40" font-family="sans-serif" font-weight="bold" font-size="16" fill="#991b1b">The Old Fragile Pipeline (5 Microservices &amp; Glue Scripts)</text>
+          
+          <!-- Old boxes -->
+          <g transform="translate(30, 60)">
+            <rect x="0" y="0" width="130" height="70" rx="8" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
+            <text x="65" y="30" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="13" fill="#1e293b">Video File</text>
+            <text x="65" y="50" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#64748b">1 GB MP4</text>
+            
+            <path d="M135 35 L165 35" stroke="#ef4444" stroke-width="2" marker-end="url(#arr-red)"/>
+            
+            <rect x="170" y="0" width="140" height="70" rx="8" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
+            <text x="240" y="28" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="13" fill="#1e293b">Python Script</text>
+            <text x="240" y="48" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#dc2626">Dumps 10K JPEGs</text>
+            
+            <path d="M315 35 L345 35" stroke="#ef4444" stroke-width="2" marker-end="url(#arr-red)"/>
+
+            <rect x="350" y="0" width="140" height="70" rx="8" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
+            <text x="420" y="28" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="13" fill="#1e293b">Cloud AI API</text>
+            <text x="420" y="48" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#dc2626">$$$ API Cost &amp; Slow</text>
+            
+            <path d="M495 35 L525 35" stroke="#ef4444" stroke-width="2" marker-end="url(#arr-red)"/>
+
+            <rect x="530" y="0" width="140" height="70" rx="8" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
+            <text x="600" y="28" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="13" fill="#1e293b">Vector Store</text>
+            <text x="600" y="48" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#dc2626">External Server</text>
+            
+            <path d="M675 35 L705 35" stroke="#ef4444" stroke-width="2" marker-end="url(#arr-red)"/>
+
+            <rect x="710" y="0" width="130" height="70" rx="8" fill="#ffffff" stroke="#ef4444" stroke-width="2"/>
+            <text x="775" y="28" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="13" fill="#1e293b">SQL Database</text>
+            <text x="775" y="48" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#dc2626">Sync Timestamps</text>
+          </g>
+
+          <!-- New PurpleDB Box -->
+          <rect x="10" y="180" width="880" height="160" rx="12" fill="#ede9fe" stroke="#8b5cf6" stroke-width="2"/>
+          <text x="30" y="210" font-family="sans-serif" font-weight="bold" font-size="16" fill="#5b21b6">The PurpleDB Solution: Single Embedded Engine (All In-Process)</text>
+          
+          <g transform="translate(30, 230)">
+            <rect x="0" y="0" width="180" height="85" rx="8" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+            <text x="90" y="32" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="14" fill="#1e293b">Your Application</text>
+            <text x="90" y="55" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#7c3aed">Python, C++, or Go</text>
+            
+            <path d="M185 42 L255 42" stroke="#7c3aed" stroke-width="3" marker-end="url(#arr-purple)"/>
+            <text x="220" y="32" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="bold" fill="#7c3aed">import</text>
+
+            <!-- Big PurpleDB unified box -->
+            <rect x="260" y="-10" width="580" height="105" rx="10" fill="#ffffff" stroke="#7c3aed" stroke-width="2.5" stroke-dasharray="none"/>
+            <text x="275" y="15" font-family="sans-serif" font-weight="bold" font-size="13" fill="#7c3aed">PURPLEDB IN-PROCESS ENGINE</text>
+            
+            <rect x="280" y="25" width="125" height="55" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+            <text x="342" y="48" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="11" fill="#0f172a">FFmpeg Isolation</text>
+            <text x="342" y="66" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">Crash-Safe Subproc</text>
+
+            <rect x="415" y="25" width="125" height="55" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+            <text x="477" y="48" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="11" fill="#0f172a">CLIP Embedder</text>
+            <text x="477" y="66" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">Pixels -> Vectors</text>
+
+            <rect x="550" y="25" width="135" height="55" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+            <text x="617" y="48" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="11" fill="#0f172a">WiscKey Vectors</text>
+            <text x="617" y="66" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">Zero Write Amp</text>
+
+            <rect x="695" y="25" width="135" height="55" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+            <text x="762" y="48" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="11" fill="#0f172a">LSM Storage</text>
+            <text x="762" y="66" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">ACID &amp; Snapshots</text>
+          </g>
+
+          <defs>
+            <marker id="arr-red" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#ef4444"/>
+            </marker>
+            <marker id="arr-purple" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L0,8 L8,4 z" fill="#7c3aed"/>
+            </marker>
+          </defs>
+        </svg>
+        <div class="diagram-caption">Figure 1: Comparison between the fragile 5-tool microservice stack and PurpleDB's single embedded binary.</div>
+      </div>
+
+      <div class="key-concept-box">
+        <div class="key-concept-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          What "Embedded Database" Truly Means
+        </div>
+        <p>
+          Just like <strong>SQLite</strong> replaced giant database servers for phone apps and local software, <strong>PurpleDB</strong> is an <em>embedded</em> database.
+          There is NO separate server process running in the background. There are NO network ports to configure, NO usernames or passwords, and NO internet calls required.
+          It is a tiny, super-fast C++ engine compiled directly into your application. When your program starts, PurpleDB starts. When your program closes, PurpleDB closes.
+        </p>
+      </div>
+    </section>
+
+    <!-- CHAPTER 1: COMPUTER HARDWARE FROM SCRATCH -->
+    <section class="chapter" id="ch1-hardware">
+      <div class="chapter-header">
+        <div class="chapter-num">1</div>
+        <div>
+          <h2 class="chapter-title">Hardware Physical Reality: How Computers Actually Work</h2>
+          <div class="chapter-subtitle">Bits, Bytes, RAM Mailboxes, and the Astronomical Speed Gap</div>
+        </div>
+      </div>
+
+      <p>
+        To understand why PurpleDB is designed the way it is, we have to look inside the physical computer case. No hand-waving—let's understand the silicon.
+      </p>
+
+      <h3 style="margin: 2rem 0 1rem; font-size: 1.35rem;">1. What is a Bit and a Byte?</h3>
+      <p>
+        Inside a computer chip are billions of microscopic electronic switches called <strong>transistors</strong>.
+        A transistor can either have electric voltage (ON = <code>1</code>) or no voltage (OFF = <code>0</code>).
+        That single 0 or 1 is called a <strong>bit</strong>.
+      </p>
+      <p>
+        Because one bit can only say Yes or No, computers group 8 bits together into a <strong>Byte</strong>.
+        One byte (like <code>01000001</code>) can represent numbers from 0 to 255, or a single letter (like the letter 'A').
+      </p>
+
+      <h3 style="margin: 2.5rem 0 1rem; font-size: 1.35rem;">2. RAM: The Infinite Street of Numbered Mailboxes</h3>
+      <p>
+        Your computer has 16 Gigabytes or 32 Gigabytes of <strong>RAM</strong> (Random Access Memory).
+        What is RAM physically?
+        Imagine a giant, perfectly straight street with 16 billion houses. Every house has a mailbox, and every mailbox can hold exactly <strong>1 Byte</strong> of data.
+      </p>
+
+      <!-- VISUAL 2: The RAM Mailbox Street -->
+      <div class="diagram-wrapper">
+        <svg viewBox="0 0 800 200" width="100%" height="auto">
+          <g transform="translate(20, 20)">
+            <text x="0" y="20" font-family="sans-serif" font-weight="bold" font-size="15" fill="#1e293b">RAM: Memory Addresses (The Street Numbers)</text>
+            
+            <!-- Mailbox 1 -->
+            <g transform="translate(10, 40)">
+              <rect x="0" y="0" width="130" height="100" rx="8" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+              <rect x="0" y="0" width="130" height="28" rx="8" fill="#7c3aed"/>
+              <text x="65" y="19" text-anchor="middle" font-family="monospace" font-weight="bold" font-size="12" fill="#ffffff">0x1000</text>
+              <text x="65" y="60" text-anchor="middle" font-family="monospace" font-size="20" font-weight="bold" fill="#0f172a">'P'</text>
+              <text x="65" y="85" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#64748b">1 Byte (01010000)</text>
+            </g>
+
+            <!-- Mailbox 2 -->
+            <g transform="translate(160, 40)">
+              <rect x="0" y="0" width="130" height="100" rx="8" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+              <rect x="0" y="0" width="130" height="28" rx="8" fill="#7c3aed"/>
+              <text x="65" y="19" text-anchor="middle" font-family="monospace" font-weight="bold" font-size="12" fill="#ffffff">0x1001</text>
+              <text x="65" y="60" text-anchor="middle" font-family="monospace" font-size="20" font-weight="bold" fill="#0f172a">'U'</text>
+              <text x="65" y="85" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#64748b">1 Byte (01010101)</text>
+            </g>
+
+            <!-- Mailbox 3 -->
+            <g transform="translate(310, 40)">
+              <rect x="0" y="0" width="130" height="100" rx="8" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+              <rect x="0" y="0" width="130" height="28" rx="8" fill="#7c3aed"/>
+              <text x="65" y="19" text-anchor="middle" font-family="monospace" font-weight="bold" font-size="12" fill="#ffffff">0x1002</text>
+              <text x="65" y="60" text-anchor="middle" font-family="monospace" font-size="20" font-weight="bold" fill="#0f172a">'R'</text>
+              <text x="65" y="85" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#64748b">1 Byte (01010010)</text>
+            </g>
+
+            <!-- Mailbox 4 -->
+            <g transform="translate(460, 40)">
+              <rect x="0" y="0" width="130" height="100" rx="8" fill="#ffffff" stroke="#7c3aed" stroke-width="2"/>
+              <rect x="0" y="0" width="130" height="28" rx="8" fill="#7c3aed"/>
+              <text x="65" y="19" text-anchor="middle" font-family="monospace" font-weight="bold" font-size="12" fill="#ffffff">0x1003</text>
+              <text x="65" y="60" text-anchor="middle" font-family="monospace" font-size="20" font-weight="bold" fill="#0f172a">'P'</text>
+              <text x="65" y="85" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#64748b">1 Byte (01010000)</text>
+            </g>
+
+            <text x="630" y="95" font-family="sans-serif" font-size="24" font-weight="bold" fill="#94a3b8">. . . 16 Billion More</text>
+          </g>
+        </svg>
+        <div class="diagram-caption">Figure 2: RAM is an indexed sequence of byte locations. <code>0x1000</code> is the hexadecimal address (street number).</div>
+      </div>
+
+      <p>
+        The number on the mailbox (like <code>0x1000</code>) is called a <strong>Memory Address</strong>.
+        When your computer wants to read data, the CPU sends that exact street number along copper wires to fetch the byte inside.
+      </p>
+
+      <h3 style="margin: 2.5rem 0 1rem; font-size: 1.35rem;">3. The Astronomical Speed Gap: RAM vs. SSD vs. Hard Drive</h3>
+      <p>
+        Why don't we just save everything directly to the hard drive or SSD?
+        Because of a brutal physical reality: <strong>The storage speed gap</strong>.
+        If we scale 1 tick of your computer processor (1 nanosecond) to 1 human heart beat (1 second), look at how long the rest of the computer takes:
+      </p>
+
+      <table class="speed-table">
+        <thead>
+          <tr>
+            <th>Hardware Component</th>
+            <th>Actual Physical Time</th>
+            <th>Scaled to Human Time</th>
+            <th>What It Feels Like</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>CPU Register / L1 Cache</strong></td>
+            <td>0.5 nanoseconds</td>
+            <td><strong>0.5 seconds</strong></td>
+            <td><span class="badge-fast">Blinking your eye</span></td>
+          </tr>
+          <tr>
+            <td><strong>Main Memory (RAM)</strong></td>
+            <td>50 nanoseconds</td>
+            <td><strong>1 minute</strong></td>
+            <td>Walking into the kitchen for water</td>
+          </tr>
+          <tr>
+            <td><strong>Fast NVMe SSD (Flash)</strong></td>
+            <td>50,000 nanoseconds</td>
+            <td><strong>14 hours</strong></td>
+            <td><span class="badge-slow">Flying from New York to Tokyo</span></td>
+          </tr>
+          <tr>
+            <td><strong>Old Mechanical Hard Drive</strong></td>
+            <td>10,000,000 nanoseconds</td>
+            <td><strong>4 months</strong></td>
+            <td><span class="badge-slow">A semester at university</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="warning-box">
+        <div class="warning-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          The Golden Rule of Database Engineering
+        </div>
+        <p>
+          Every single time a database has to touch the disk or SSD, it is like pausing for 14 hours instead of 1 minute.
+          <strong>PurpleDB is fast because it is architected so the CPU almost NEVER has to wait on the SSD.</strong>
+        </p>
+      </div>
+    </section>
+
+    <!-- CHAPTER 2: C++ FROM SCRATCH -->
+    <section class="chapter" id="ch2-cpp">
+      <div class="chapter-header">
+        <div class="chapter-num">2</div>
+        <div>
+          <h2 class="chapter-title">C++ From Scratch: No Jargon, Just Machines</h2>
+          <div class="chapter-subtitle">Pointers, Memory Leaks, Garbage Collectors, and RAII Demystified</div>
+        </div>
+      </div>
+
+      <p>
+        Many people fear C++ because tutorials use terrifying words like "polymorphism", "dangling pointers", and "rvalue references".
+        Let's strip all the mysticism away. What is C++ actually doing?
+      </p>
+
+      <h3 style="margin: 2rem 0 1rem; font-size: 1.35rem;">1. What on Earth is a "Pointer"?</h3>
+      <p>
+        Remember the street of numbered mailboxes?
+        Imagine you have a piece of paper in your pocket, and you write: <strong>"0x1000"</strong> on it.
+        That piece of paper is a <strong>Pointer</strong>!
+      </p>
+      <div class="analogy-box">
+        <div class="analogy-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Pointer Analogy: The Treasure Map
+        </div>
+        <p>
+          A variable is the treasure chest itself (holding coins or data).
+          A <strong>pointer</strong> is NOT the treasure chest—it is a tiny piece of paper with the GPS coordinates written on it.
+          In C++, passing a pointer around takes 8 bytes of space. If you have a 100 Megabyte video frame, you don't copy all 100 Megabytes; you just hand someone a piece of paper with the address where it sits. This is called <strong>Zero-Copy</strong>.
+        </p>
+      </div>
+
+      <h3 style="margin: 2.5rem 0 1rem; font-size: 1.35rem;">2. What is "Memory Allocation"? The Stack vs. The Heap</h3>
+      <p>
+        When your code runs, where do variables live?
+      </p>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 1.5rem 0;">
+        <div style="background: #ffffff; border: 2px solid var(--border-color); border-radius: var(--radius-md); padding: 1.5rem;">
+          <h4 style="color: var(--brand-purple); font-size: 1.15rem; margin-bottom: 0.5rem;">The Stack (The Fast Buffet Plates)</h4>
+          <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            Imagine a stack of plates at a restaurant buffet. When a function starts, it puts a plate on top. When the function ends, that plate is popped off.
+          </p>
+          <ul style="font-size: 0.88rem; color: var(--text-muted); padding-left: 1.2rem;">
+            <li><strong>Speed</strong>: Lightning fast (a single CPU instruction).</li>
+            <li><strong>Catch</strong>: Variables must have a fixed, known size ahead of time. You can't put a dynamic 1GB video on the stack!</li>
+          </ul>
+        </div>
+
+        <div style="background: #ffffff; border: 2px solid var(--border-color); border-radius: var(--radius-md); padding: 1.5rem;">
+          <h4 style="color: var(--brand-amber); font-size: 1.15rem; margin-bottom: 0.5rem;">The Heap (The Giant Rental Warehouse)</h4>
+          <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            A massive warehouse of RAM. You ask the operating system: "Can you rent me 50 Megabytes of empty space right now?" The OS finds a spot and hands you the pointer address.
+          </p>
+          <ul style="font-size: 0.88rem; color: var(--text-muted); padding-left: 1.2rem;">
+            <li><strong>Advantage</strong>: Holds any dynamic size (video files, vector graphs).</li>
+            <li><strong>Catch</strong>: YOU must tell the computer when you are done renting it!</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 style="margin: 2.5rem 0 1rem; font-size: 1.35rem;">3. What is a "Garbage Collector" (and why C++ avoids it)?</h3>
+      <p>
+        If you rent space in the warehouse (the Heap) and forget to give it back, that space is lost forever until your computer restarts. This is called a <strong>Memory Leak</strong>.
+      </p>
+
+      <!-- INTERACTIVE SIMULATOR: GC vs RAII -->
+      <div class="simulator-container">
+        <div class="simulator-header">
+          <div class="simulator-title">
+            <span>Interactive Simulator: Garbage Collector vs. C++ RAII</span>
+            <span class="sim-badge">Live Demonstration</span>
+          </div>
+          <div class="simulator-controls">
+            <button class="sim-btn" onclick="runSimGC()">Simulate: Language with GC (Java/Python/Go)</button>
+            <button class="sim-btn secondary" onclick="runSimRAII()">Simulate: C++ RAII (PurpleDB)</button>
+          </div>
+        </div>
+
+        <div class="simulator-canvas" id="simGCRaiiCanvas">
+          <div style="font-size: 0.95rem; color: var(--text-light); text-align: center;">
+            Click one of the buttons above to watch what happens to computer memory and CPU execution!
+          </div>
+        </div>
+
+        <div class="sim-step-explanation" id="simGCRaiiExplain">
+          <strong>Concept Explanation</strong>: When memory is no longer needed, how does the computer clean it up?
+        </div>
+      </div>
+
+      <div class="analogy-box">
+        <div class="analogy-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+          The Janitor Analogy (Garbage Collection vs. C++ RAII)
+        </div>
+        <p>
+          <strong>The Garbage Collector (Java / Python / Go)</strong>:
+          Imagine an office where employees drop empty soda cans on the floor all day. Every 10 minutes, a giant siren blares, the doors lock, and everyone MUST FREEZE ("Stop-the-World!"). A janitor walks through every cubicle, inspecting every single can to see if it's trash, and sweeps it into a bin. While the janitor works, all work halts! If you are streaming live video or running a fast search, the video stutters.
+        </p>
+        <p style="margin-top: 0.75rem;">
+          <strong>C++ RAII (Resource Acquisition Is Initialization)</strong>:
+          In C++, there is NO janitor. Every employee carries their soda can directly to the recycling bin the exact millisecond they finish drinking it. Memory is cleaned up instantly, deterministically, with ZERO pause sirens!
+          <strong>That is why high-performance databases (SQLite, RocksDB, PurpleDB) are built in C++.</strong>
+        </p>
+      </div>
+    </section>
+
+    <!-- CHAPTER 3: MEANING AS VECTORS -->
+    <section class="chapter" id="ch3-vectors">
+      <div class="chapter-header">
+        <div class="chapter-num">3</div>
+        <div>
+          <h2 class="chapter-title">Multimodal Vectors: How Computers "Understand" Videos</h2>
+          <div class="chapter-subtitle">Turning pixels and words into coordinates in a high-dimensional space</div>
+        </div>
+      </div>
+
+      <p>
+        How can a computer know that a video frame of a cute puppy playing in sand has anything to do with the English words <em>"beach dog"</em>?
+        The answer is <strong>Multimodal Vector Embeddings</strong> (using an AI vision-language model called CLIP).
+      </p>
+
+      <h3 style="margin: 2rem 0 1rem; font-size: 1.35rem;">1. What is a "Vector"?</h3>
+      <p>
+        Forget linear algebra textbooks. A vector is just an arrow pointing to a spot on a map!
+        In 2 dimensions (like a city map), you have 2 numbers: $[X, Y]$ (e.g. 5 blocks East, 3 blocks North).
+      </p>
+      <p>
+        In PurpleDB, an AI model takes an image and converts it into a list of <strong>512 numbers</strong> (a 512-dimensional vector).
+        These 512 numbers represent conceptual coordinates in "Meaning Space".
+      </p>
+
+      <!-- INTERACTIVE 2D VECTOR SPACE SIMULATOR -->
+      <div class="simulator-container">
+        <div class="simulator-header">
+          <div class="simulator-title">
+            <span>Interactive Simulator: The Semantic Meaning Map</span>
+            <span class="sim-badge">Interactive Map</span>
+          </div>
+          <div style="font-size: 0.85rem; color: var(--text-light);">
+            Click any two concepts below to calculate their angle and similarity!
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 1rem; flex-wrap: wrap;">
+          <button class="sim-btn secondary" onclick="selectVector(0)">🐶 Golden Retriever Puppy</button>
+          <button class="sim-btn secondary" onclick="selectVector(1)">🐕 Dog Running on Grass</button>
+          <button class="sim-btn secondary" onclick="selectVector(2)">🏖️ Sunny Ocean Beach</button>
+          <button class="sim-btn secondary" onclick="selectVector(3)">🏎️ Red Sports Car Racing</button>
+          <button class="sim-btn secondary" onclick="selectVector(4)">🍕 Pepperoni Pizza Slice</button>
+        </div>
+
+        <div class="simulator-canvas" style="min-height: 320px;">
+          <svg id="vectorCanvas" viewBox="0 0 600 300" width="100%" height="300">
+            <!-- Grid lines -->
+            <line x1="50" y1="250" x2="550" y2="250" stroke="#cbd5e1" stroke-width="2"/>
+            <line x1="50" y1="250" x2="50" y2="30" stroke="#cbd5e1" stroke-width="2"/>
+            <text x="560" y="255" font-family="sans-serif" font-size="12" fill="#64748b">Animals / Nature (X)</text>
+            <text x="50" y="20" font-family="sans-serif" font-size="12" fill="#64748b">Vehicles / Tech (Y)</text>
+
+            <!-- Vector points will be drawn by JS -->
+            <g id="vectorPlots"></g>
+          </svg>
+        </div>
+
+        <div class="sim-step-explanation" id="vectorExplain">
+          <strong>Select any concept above</strong> to plot its arrow from the origin. Concepts with similar meaning point in nearly the exact same direction!
+        </div>
+      </div>
+
+      <div class="key-concept-box">
+        <div class="key-concept-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          What is "Cosine Similarity"?
+        </div>
+        <p>
+          To compare two concepts, we measure the <strong>angle ($\theta$)</strong> between their arrows:
+        </p>
+        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; font-size: 0.95rem;">
+          <li><strong>Angle is $0^\circ$ ($\cos = 1.0$)</strong>: Perfect match! Exactly the same concept.</li>
+          <li><strong>Angle is $45^\circ$ ($\cos \approx 0.7$)</strong>: Strongly related (e.g., "Golden retriever" and "Dog in grass").</li>
+          <li><strong>Angle is $90^\circ$ ($\cos = 0.0$)</strong>: Completely unrelated (e.g., "Dog" and "Formula 1 Car").</li>
+        </ul>
+        <p>
+          In PurpleDB, searching for a video means calculating this cosine similarity between your text query vector and thousands of video moment vectors using SIMD hardware acceleration ([`core/vector/distance.cc`](file:///c:/Users/vinay/OneDrive/Desktop/Purpled/core/vector/distance.cc)).
+        </p>
+      </div>
+    </section>
+
+    <!-- CHAPTER 4: VIDEO INGESTION PIPELINE -->
+    <section class="chapter" id="ch4-pipeline">
+      <div class="chapter-header">
+        <div class="chapter-num">4</div>
+        <div>
+          <h2 class="chapter-title">The Video Pipeline: From MP4 File to Searchable Moments</h2>
+          <div class="chapter-subtitle">FFmpeg Subprocess Isolation, Temporal Clustering, and Medoid Frames</div>
+        </div>
+      </div>
+
+      <p>
+        When you give PurpleDB an MP4 video file, what actually happens under the hood?
+        Let's step through the pipeline step by step:
+      </p>
+
+      <!-- INTERACTIVE VIDEO INGESTION STEPPER -->
+      <div class="simulator-container">
+        <div class="simulator-header">
+          <div class="simulator-title">
+            <span>Interactive Simulator: The Ingestion Pipeline</span>
+            <span class="sim-badge">Step-by-Step</span>
+          </div>
+          <div class="simulator-controls">
+            <button class="sim-btn secondary" onclick="prevIngestStep()">Previous Step</button>
+            <button class="sim-btn" onclick="nextIngestStep()">Next Step</button>
+          </div>
+        </div>
+
+        <div class="simulator-canvas" id="ingestCanvas" style="min-height: 200px;">
+          <!-- Ingest visual steps populated by JS -->
+        </div>
+
+        <div class="sim-step-explanation" id="ingestExplain">
+          Step 1 of 5: Click 'Next Step' to watch how a video is decomposed into semantic moments.
+        </div>
+      </div>
+
+      <h3 style="margin: 2rem 0 1rem; font-size: 1.35rem;">Critical Systems Insight: Subprocess Crash Isolation (ADR-031)</h3>
+      <p>
+        Why does PurpleDB run the external <code>ffmpeg</code> program inside an <strong>isolated child subprocess</strong> ([`core/pipeline/frame_decoder.cc`](file:///c:/Users/vinay/OneDrive/Desktop/Purpled/core/pipeline/frame_decoder.cc)) instead of directly linking an FFmpeg C library inside the database engine?
+      </p>
+
+      <div class="warning-box">
+        <div class="warning-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Why Untrusted Video Codecs Are Dangerous
+        </div>
+        <p>
+          Video compression formats (H.264, HEVC, AV1) are extraordinarily complex. Malicious or corrupt video files frequently contain exploit payloads designed to trigger buffer overflows or memory corruption inside media decoders.
+          If PurpleDB decoded videos in its main memory, a single corrupt video file could crash the entire database or corrupt your data!
+          By spawning an isolated child process, if FFmpeg crashes or runs out of memory, <strong>only the disposable child process dies</strong>. PurpleDB catches the exit code, logs an error, and the database remains 100% healthy.
+        </p>
+      </div>
+    </section>
+
+    <!-- CHAPTER 5: THE LSM STORAGE ENGINE -->
+    <section class="chapter" id="ch5-storage">
+      <div class="chapter-header">
+        <div class="chapter-num">5</div>
+        <div>
+          <h2 class="chapter-title">The Storage Engine: Log-Structured Merge (LSM) Trees</h2>
+          <div class="chapter-subtitle">Turning random SSD writes into ultra-fast sequential appends</div>
+        </div>
+      </div>
+
+      <p>
+        Once video moments are clustered, how does PurpleDB store them on disk so they never get lost—even if the computer loses power mid-write?
+        PurpleDB uses an <strong>LSM-Tree</strong> (Log-Structured Merge Tree), the same storage architecture behind Google's Bigtable and RocksDB.
+      </p>
+
+      <h3 style="margin: 2rem 0 1rem; font-size: 1.35rem;">The Anatomy of an LSM Write</h3>
+      <p>
+        Every write in PurpleDB goes through three distinct stages:
+      </p>
+
+      <!-- DIAGRAM 3: Full LSM Write Path -->
+      <div class="diagram-wrapper">
+        <svg viewBox="0 0 850 380" width="100%" height="auto">
+          <!-- Step 1: WAL -->
+          <g transform="translate(40, 40)">
+            <rect x="0" y="0" width="220" height="140" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+            <text x="110" y="30" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="14" fill="#92400e">1. Write-Ahead Log (WAL)</text>
+            <text x="110" y="55" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#78350f">Append-Only on Disk</text>
+            <rect x="20" y="70" width="180" height="50" rx="6" fill="#ffffff" stroke="#f59e0b" stroke-width="1"/>
+            <text x="110" y="92" text-anchor="middle" font-family="monospace" font-size="11" fill="#0f172a">32 KiB Blocks + CRC32C</text>
+            <text x="110" y="108" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">Crash Durability Guarantee</text>
+          </g>
+
+          <!-- Arrow 1 to 2 -->
+          <path d="M265 110 L315 110" stroke="#7c3aed" stroke-width="3" marker-end="url(#arr-purple)"/>
+
+          <!-- Step 2: MemTable -->
+          <g transform="translate(325, 40)">
+            <rect x="0" y="0" width="220" height="140" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+            <text x="110" y="30" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="14" fill="#5b21b6">2. MemTable (SkipList)</text>
+            <text x="110" y="55" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#6d28d9">In-Memory Sorted Index</text>
+            <rect x="20" y="70" width="180" height="50" rx="6" fill="#ffffff" stroke="#7c3aed" stroke-width="1"/>
+            <text x="110" y="92" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="bold" fill="#0f172a">Lock-Free Readers</text>
+            <text x="110" y="108" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">Bump-Pointer Arena Alloc</text>
+          </g>
+
+          <!-- Arrow 2 to 3 (Flush) -->
+          <path d="M435 185 L435 235" stroke="#7c3aed" stroke-width="3" marker-end="url(#arr-purple)"/>
+          <text x="490" y="215" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="12" fill="#7c3aed">Flush at 4 MB</text>
+
+          <!-- Step 3: SSTables on Disk -->
+          <g transform="translate(180, 245)">
+            <rect x="0" y="0" width="510" height="110" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+            <text x="255" y="28" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="14" fill="#15803d">3. SSTables on Disk (Sorted String Tables)</text>
+            
+            <g transform="translate(25, 45)">
+              <rect x="0" y="0" width="95" height="48" rx="6" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+              <text x="47" y="24" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="11" fill="#0f172a">Data Blocks</text>
+              <text x="47" y="40" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">Prefix Comp.</text>
+
+              <rect x="110" y="0" width="115" height="48" rx="6" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+              <text x="167" y="24" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="11" fill="#0f172a">Bloom Filters</text>
+              <text x="167" y="40" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">Instant No-Hit</text>
+
+              <rect x="240" y="0" width="105" height="48" rx="6" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+              <text x="292" y="24" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="11" fill="#0f172a">Index Block</text>
+              <text x="292" y="40" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">Binary Search</text>
+
+              <rect x="360" y="0" width="100" height="48" rx="6" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+              <text x="410" y="24" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="11" fill="#0f172a">48B Footer</text>
+              <text x="410" y="40" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#64748b">Magic Check</text>
+            </g>
+          </g>
+        </svg>
+        <div class="diagram-caption">Figure 3: The complete LSM-tree pipeline. Data flows from sequential disk append (WAL) to memory (MemTable) to immutable SSTable files.</div>
+      </div>
+
+      <h3 style="margin: 2.5rem 0 1rem; font-size: 1.35rem;">What is a Bloom Filter? (The Bouncer Analogy)</h3>
+      <p>
+        Imagine a nightclub with 100 VIP guests inside. A million people walk up to the door and ask: "Is my friend Alice inside?"
+        Checking the entire club takes 5 minutes.
+        Instead, you hire a mathematical bouncer holding a tiny card with numbers.
+        If the bouncer says: <strong>"NO, Alice is 100% definitely NOT inside"</strong>, you leave immediately without wasting time searching!
+      </p>
+      <div class="key-concept-box">
+        <div class="key-concept-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          Why Bloom Filters Matter in PurpleDB
+        </div>
+        <p>
+          In PurpleDB, an SSTable on disk can contain 50,000 keys. Before reading a single byte from the SSD, PurpleDB checks the <strong>Bloom Filter</strong> in memory ([`core/storage/filter_policy.cc`](file:///c:/Users/vinay/OneDrive/Desktop/Purpled/core/storage/filter_policy.cc)).
+          For 99% of missing keys, the Bloom filter instantly rejects the lookup in <strong>20 nanoseconds</strong>, preventing a 14-hour SSD read trip!
+        </p>
+      </div>
+    </section>
+
+    <!-- CHAPTER 6: WISCKEY & HNSW -->
+    <section class="chapter" id="ch6-wisckey">
+      <div class="chapter-header">
+        <div class="chapter-num">6</div>
+        <div>
+          <h2 class="chapter-title">The Secret Sauce: WiscKey Separation &amp; HNSW Graphs</h2>
+          <div class="chapter-subtitle">Why traditional databases choke on vectors, and how PurpleDB searches in 6ms</div>
+        </div>
+      </div>
+
+      <h3 style="margin: 1.5rem 0 1rem; font-size: 1.35rem;">1. The WiscKey Breakthrough: Key-Value Separation</h3>
+      <p>
+        In an LSM database, as data grows, background threads merge small files into larger files. This is called <strong>Compaction</strong>.
+        If your database stores normal text keys (like a 20-byte username), compaction is fast.
+      </p>
+      <p>
+        BUT vector embeddings are huge! A 512-dimension vector takes <strong>2,048 bytes</strong>.
+        If you put vectors inside the LSM tree, compaction rewrites those giant 2KB vectors over and over again—up to <strong>30 times</strong>!
+        This destroys SSD flash memory and destroys write performance (high <em>write amplification</em>).
+      </p>
+
+      <div class="key-concept-box">
+        <div class="key-concept-title">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          The WiscKey Architecture in PurpleDB
+        </div>
+        <p>
+          PurpleDB implements the landmark <strong>WiscKey pattern</strong> ([`core/vector/vector_segment.cc`](file:///c:/Users/vinay/OneDrive/Desktop/Purpled/core/vector/vector_segment.cc)):
+        </p>
+        <ul style="margin: 0.75rem 0; padding-left: 1.5rem; font-size: 0.95rem;">
+          <li><strong>Vectors are written once</strong> to an append-only file (<code>.vec</code> segment) and NEVER moved or rewritten during compaction.</li>
+          <li><strong>The LSM Tree only holds a tiny pointer</strong> (file ID + byte offset, just 16 bytes).</li>
+        </ul>
+        <p>
+          Result: Write amplification drops from $30\times$ down to near $1\times$, and ingestion runs at maximum disk bandwidth!
+        </p>
+      </div>
+
+      <h3 style="margin: 2.5rem 0 1rem; font-size: 1.35rem;">2. HNSW: The Express Highway Graph for Vectors</h3>
+      <p>
+        If you have 100,000 video moments in your database, comparing your search query against every single vector takes too long.
+        PurpleDB uses an <strong>HNSW (Hierarchical Navigable Small World) Proximity Graph</strong> ([`core/vector/hnsw.cc`](file:///c:/Users/vinay/OneDrive/Desktop/Purpled/core/vector/hnsw.cc)).
+      </p>
+
+      <!-- DIAGRAM 4: Multi-Layer HNSW Graph -->
+      <div class="diagram-wrapper">
+        <svg viewBox="0 0 800 320" width="100%" height="auto">
+          <!-- Layer 2: Express Highway -->
+          <g transform="translate(50, 30)">
+            <rect x="0" y="0" width="700" height="60" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="20" y="35" font-family="sans-serif" font-weight="bold" font-size="12" fill="#64748b">Layer 2: Express Highway (Few nodes, huge leaps)</text>
+            <circle cx="250" cy="30" r="10" fill="#7c3aed"/>
+            <circle cx="550" cy="30" r="10" fill="#7c3aed"/>
+            <line x1="260" y1="30" x2="540" y2="30" stroke="#7c3aed" stroke-width="3" stroke-dasharray="4"/>
+          </g>
+
+          <!-- Layer 1: Regional Roads -->
+          <g transform="translate(50, 110)">
+            <rect x="0" y="0" width="700" height="70" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="20" y="40" font-family="sans-serif" font-weight="bold" font-size="12" fill="#64748b">Layer 1: Regional Roads (More connections)</text>
+            <circle cx="180" cy="35" r="8" fill="#6366f1"/>
+            <circle cx="250" cy="35" r="8" fill="#7c3aed"/>
+            <circle cx="380" cy="35" r="8" fill="#6366f1"/>
+            <circle cx="550" cy="35" r="8" fill="#7c3aed"/>
+            <line x1="188" y1="35" x2="242" y2="35" stroke="#6366f1" stroke-width="2"/>
+            <line x1="258" y1="35" x2="372" y2="35" stroke="#6366f1" stroke-width="2"/>
+            <line x1="388" y1="35" x2="542" y2="35" stroke="#6366f1" stroke-width="2"/>
+          </g>
+
+          <!-- Layer 0: Local City Streets -->
+          <g transform="translate(50, 200)">
+            <rect x="0" y="0" width="700" height="90" rx="8" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="20" y="50" font-family="sans-serif" font-weight="bold" font-size="12" fill="#64748b">Layer 0: Local Streets (All vectors connected)</text>
+            <!-- Many nodes -->
+            <circle cx="120" cy="45" r="6" fill="#94a3b8"/>
+            <circle cx="180" cy="45" r="6" fill="#6366f1"/>
+            <circle cx="230" cy="30" r="6" fill="#94a3b8"/>
+            <circle cx="250" cy="55" r="6" fill="#7c3aed"/>
+            <circle cx="310" cy="40" r="6" fill="#94a3b8"/>
+            <circle cx="380" cy="45" r="6" fill="#6366f1"/>
+            <circle cx="450" cy="30" r="6" fill="#94a3b8"/>
+            <circle cx="510" cy="55" r="6" fill="#94a3b8"/>
+            <circle cx="550" cy="45" r="6" fill="#7c3aed"/>
+            <circle cx="620" cy="40" r="6" fill="#94a3b8"/>
+            
+            <!-- Target Match -->
+            <circle cx="550" cy="45" r="14" fill="none" stroke="#22c55e" stroke-width="3"/>
+            <text x="550" y="80" text-anchor="middle" font-family="sans-serif" font-weight="bold" font-size="11" fill="#15803d">Target Moment Found!</text>
+          </g>
+        </svg>
+        <div class="diagram-caption">Figure 4: HNSW Multi-Layer Skip Graph. The search jumps across the express highway, then zooms down to the nearest video moments in logarithmic time ($O(\log N)$).</div>
+      </div>
+    </section>
+
+    <!-- CHAPTER 7: CODEBASE MAP -->
+    <section class="chapter" id="ch7-codebase">
+      <div class="chapter-header">
+        <div class="chapter-num">7</div>
+        <div>
+          <h2 class="chapter-title">The PurpleDB Codebase Map (Rosetta Stone)</h2>
+          <div class="chapter-subtitle">Every single file in the repository mapped to what it does</div>
+        </div>
+      </div>
+
+      <p>
+        Every concept you learned in this guide exists as real, production C++17 and Python code in the repository.
+        Here is the authoritative mapping:
+      </p>
+
+      <div class="file-map-grid">
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/storage/wal_writer.cc</div>
+            <div class="file-card-desc">Write-Ahead Log writer. Formats 32 KiB binary blocks with Castagnoli CRC-32C checksums for instant power-loss durability.</div>
+          </div>
+          <span class="file-card-tag">Storage / Durability</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/storage/skiplist.h</div>
+            <div class="file-card-desc">Lock-free concurrent reader SkipList MemTable. Uses acquire-release memory fences so readers never wait on locks.</div>
+          </div>
+          <span class="file-card-tag">Storage / MemTable</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/storage/table.cc</div>
+            <div class="file-card-desc">SSTable file reader. Reads index blocks, decodes prefix-compressed key records, and verifies 48-byte footers.</div>
+          </div>
+          <span class="file-card-tag">Storage / SSTable</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/storage/filter_policy.cc</div>
+            <div class="file-card-desc">Bloom Filter implementation using Kirsch-Mitzenmacher double-hashing to reject non-existent keys in nanoseconds.</div>
+          </div>
+          <span class="file-card-tag">Storage / Bloom Filter</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/vector/vector_segment.cc</div>
+            <div class="file-card-desc">WiscKey append-only .vec segment file writer and reader. Keeps high-dimensional embeddings out of LSM compactions.</div>
+          </div>
+          <span class="file-card-tag">Vector / WiscKey</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/vector/hnsw.cc</div>
+            <div class="file-card-desc">Hierarchical Navigable Small World proximity graph. Delivers sub-10ms nearest neighbor search over millions of vectors.</div>
+          </div>
+          <span class="file-card-tag">Vector / HNSW</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/vector/distance.cc</div>
+            <div class="file-card-desc">SIMD AVX2 and ARM NEON hardware acceleration for dot product, cosine distance, and int8 scalar quantization.</div>
+          </div>
+          <span class="file-card-tag">Vector / SIMD</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/pipeline/frame_decoder.cc</div>
+            <div class="file-card-desc">Subprocess FFmpeg video frame extractor. Isolates video decoding into a child process to prevent engine crashes.</div>
+          </div>
+          <span class="file-card-tag">Pipeline / FFmpeg</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/pipeline/moment_detector.cc</div>
+            <div class="file-card-desc">Dynamic scene boundary clustering. Groups similar frames into temporal intervals and picks medoid representative thumbnails.</div>
+          </div>
+          <span class="file-card-tag">Pipeline / Clustering</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/query/query_engine.cc</div>
+            <div class="file-card-desc">Multimodal Query Engine. Coordinates text search, visual search, snapshot isolation, post-filtering, and cascading deletions.</div>
+          </div>
+          <span class="file-card-tag">Query / Engine</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">core/purpledb_c.cc</div>
+            <div class="file-card-desc">Stable C ABI v1 wrapper. Opaque handles (pdb_t), zero C++ exceptions leaking across the boundary, and thread-local error strings.</div>
+          </div>
+          <span class="file-card-tag">ABI / C Boundary</span>
+        </div>
+
+        <div class="file-card">
+          <div>
+            <div class="file-card-path">bindings/python/purpledb_py.cc</div>
+            <div class="file-card-desc">Native pybind11 Python extension. Explicitly releases the Python Global Interpreter Lock (GIL) during long vector operations.</div>
+          </div>
+          <span class="file-card-tag">Python / pybind11</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <p><strong>PurpleDB v1.0.0</strong> &mdash; Embedded Multimodal Database for Semantic Video and Image Search.</p>
+    <p style="margin-top: 6px; font-size: 0.8rem;">Designed for edge intelligence, local video collections, and autonomous agents.</p>
+  </footer>
+
+  <!-- Interactive Simulator Logic (Vanilla JS, 0 dependencies) -->
+  <script>
+    // 1. Reading Progress Bar
+    window.addEventListener('scroll', () => {
+      const winScroll = document.documentElement.scrollTop;
+      const height = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      const scrolled = (winScroll / height) * 100;
+      document.getElementById('progressBar').style.width = scrolled + '%';
+    });
+
+    // 2. GC vs RAII Simulator
+    function runSimGC() {
+      const canvas = document.getElementById('simGCRaiiCanvas');
+      const explain = document.getElementById('simGCRaiiExplain');
+      canvas.innerHTML = `
+        <div style="width: 100%; text-align: center;">
+          <div style="color: #b91c1c; font-weight: 800; font-size: 1.25rem; margin-bottom: 8px;">
+            🚨 [STOP THE WORLD!] Garbage Collector Running...
+          </div>
+          <div style="font-size: 0.9rem; color: #7f1d1d; margin-bottom: 12px;">
+            CPU is 100% frozen. Video search request is stalled while the janitor sweeps memory.
+          </div>
+          <div class="memory-grid">
+            <div class="memory-cell heap" style="border-color: #ef4444;"><div class="memory-cell-addr">0x1000</div><div class="memory-cell-name">Frame #1</div><div class="memory-cell-val" style="color: #ef4444;">TRASH</div></div>
+            <div class="memory-cell heap" style="border-color: #ef4444;"><div class="memory-cell-addr">0x1008</div><div class="memory-cell-name">Frame #2</div><div class="memory-cell-val" style="color: #ef4444;">TRASH</div></div>
+            <div class="memory-cell heap" style="border-color: #22c55e;"><div class="memory-cell-addr">0x1010</div><div class="memory-cell-name">Active Query</div><div class="memory-cell-val" style="color: #15803d;">LIVE</div></div>
+          </div>
+        </div>
+      `;
+      explain.innerHTML = `
+        <strong style="color: #b91c1c;">Result: Jitter and Stalls</strong>. In garbage collected runtimes, allocations pile up until an emergency sweep pauses all user threads. This causes noticeable 50ms-200ms latency spikes in search responses.
+      `;
+    }
+
+    function runSimRAII() {
+      const canvas = document.getElementById('simGCRaiiCanvas');
+      const explain = document.getElementById('simGCRaiiExplain');
+      canvas.innerHTML = `
+        <div style="width: 100%; text-align: center;">
+          <div style="color: #15803d; font-weight: 800; font-size: 1.25rem; margin-bottom: 8px;">
+            ⚡ C++ RAII: Instant Deterministic Cleanup
+          </div>
+          <div style="font-size: 0.9rem; color: #166534; margin-bottom: 12px;">
+            Zero pauses. Memory freed the exact microsecond the variable leaves scope.
+          </div>
+          <div class="memory-grid">
+            <div class="memory-cell" style="opacity: 0.4;"><div class="memory-cell-addr">0x1000</div><div class="memory-cell-name">Freed</div><div class="memory-cell-val">0x00</div></div>
+            <div class="memory-cell" style="opacity: 0.4;"><div class="memory-cell-addr">0x1008</div><div class="memory-cell-name">Freed</div><div class="memory-cell-val">0x00</div></div>
+            <div class="memory-cell active"><div class="memory-cell-addr">0x1010</div><div class="memory-cell-name">Active Query</div><div class="memory-cell-val">LIVE</div></div>
+          </div>
+        </div>
+      `;
+      explain.innerHTML = `
+        <strong style="color: #15803d;">Result: Zero-Latency Smooth Execution</strong>. In C++, destructor functions execute automatically at block scope boundaries. Memory is recycled immediately with zero background thread sweeps.
+      `;
+    }
+
+    // 3. Vector Space Simulator
+    const vectorData = [
+      { name: "Puppy", x: 420, y: 70, label: "🐶 Golden Puppy", color: "#7c3aed" },
+      { name: "DogGrass", x: 400, y: 85, label: "🐕 Dog in Grass", color: "#6366f1" },
+      { name: "Beach", x: 380, y: 150, label: "🏖️ Ocean Beach", color: "#0284c7" },
+      { name: "Car", x: 120, y: 220, label: "🏎️ Sports Car", color: "#ef4444" },
+      { name: "Pizza", x: 260, y: 190, label: "🍕 Pepperoni Pizza", color: "#d97706" }
+    ];
+
+    let selectedVectors = [0, 1];
+
+    function drawVectors() {
+      const plots = document.getElementById('vectorPlots');
+      if (!plots) return;
+      plots.innerHTML = '';
+
+      // Draw all point dots
+      vectorData.forEach((v, idx) => {
+        const isSel = selectedVectors.includes(idx);
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", v.x);
+        circle.setAttribute("cy", 250 - v.y);
+        circle.setAttribute("r", isSel ? "9" : "6");
+        circle.setAttribute("fill", v.color);
+        plots.appendChild(circle);
+
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", v.x + 12);
+        text.setAttribute("y", 250 - v.y + 4);
+        text.setAttribute("font-family", "sans-serif");
+        text.setAttribute("font-size", isSel ? "12" : "10");
+        text.setAttribute("font-weight", isSel ? "bold" : "normal");
+        text.setAttribute("fill", isSel ? "#0f172a" : "#64748b");
+        text.textContent = v.label;
+        plots.appendChild(text);
+
+        if (isSel) {
+          const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          line.setAttribute("x1", "50");
+          line.setAttribute("y1", "250");
+          line.setAttribute("x2", v.x);
+          line.setAttribute("y2", 250 - v.y);
+          line.setAttribute("stroke", v.color);
+          line.setAttribute("stroke-width", "3");
+          line.setAttribute("stroke-dasharray", "none");
+          plots.appendChild(line);
+        }
+      });
+
+      // Calculate angle and cosine similarity between the two selected
+      if (selectedVectors.length === 2) {
+        const v1 = vectorData[selectedVectors[0]];
+        const v2 = vectorData[selectedVectors[1]];
+        const dx1 = v1.x - 50, dy1 = v1.y;
+        const dx2 = v2.x - 50, dy2 = v2.y;
+        const dot = dx1 * dx2 + dy1 * dy2;
+        const mag1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+        const mag2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        const cosSim = (dot / (mag1 * mag2)).toFixed(3);
+        const angleDeg = (Math.acos(Math.min(1, Math.max(-1, cosSim))) * (180 / Math.PI)).toFixed(1);
+
+        document.getElementById('vectorExplain').innerHTML = `
+          Comparing <strong>${v1.label}</strong> and <strong>${v2.label}</strong>:<br>
+          • Angle between vectors: <strong style="color: var(--brand-purple);">${angleDeg}&deg;</strong><br>
+          • Cosine Similarity score: <strong style="color: #15803d; font-size: 1.1rem;">${cosSim}</strong> 
+          ${cosSim > 0.8 ? '(Extremely similar meaning!)' : (cosSim > 0.4 ? '(Moderately related)' : '(Completely unrelated)')}
+        `;
+      }
+    }
+
+    function selectVector(idx) {
+      if (selectedVectors.includes(idx)) return;
+      selectedVectors.shift();
+      selectedVectors.push(idx);
+      drawVectors();
+    }
+
+    // 4. Ingestion Pipeline Stepper
+    const ingestSteps = [
+      {
+        title: "Step 1: Isolated Subprocess FFmpeg Decoding",
+        html: `
+          <div style="text-align: center;">
+            <div style="font-weight: 700; color: var(--brand-purple); margin-bottom: 6px;">[Subprocess Fork: PID 4821]</div>
+            <div style="display: flex; gap: 10px; align-items: center; justify-content: center;">
+              <div style="background: #ffffff; border: 2px solid #7c3aed; padding: 10px 14px; border-radius: 8px; font-weight: bold;">input.mp4</div>
+              <span style="font-size: 1.4rem;">&rarr;</span>
+              <div style="background: #ede9fe; border: 2px dashed #7c3aed; padding: 10px 14px; border-radius: 8px;">Downscale to 224x224 RGB</div>
+              <span style="font-size: 1.4rem;">&rarr;</span>
+              <div style="background: #ffffff; border: 2px solid #22c55e; padding: 10px 14px; border-radius: 8px; font-weight: bold;">Raw Frames Stream</div>
+            </div>
+          </div>
+        `,
+        explain: "The video file is fed to an isolated FFmpeg process that extracts frames at 1 fps and scales them to 224x224 RGB pixels. If the video is corrupt, only this child process crashes."
+      },
+      {
+        title: "Step 2: Multimodal Embedding Generation",
+        html: `
+          <div style="text-align: center;">
+            <div style="font-weight: 700; color: var(--brand-indigo); margin-bottom: 6px;">[CLIP Vision Projection: 224x224 -> 512 Floats]</div>
+            <div style="display: flex; gap: 8px; justify-content: center;">
+              <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; font-size: 0.8rem;">Frame 0.0s &rarr; [0.12, -0.45, ...]</div>
+              <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; font-size: 0.8rem;">Frame 1.0s &rarr; [0.14, -0.42, ...]</div>
+              <div style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; font-size: 0.8rem;">Frame 2.0s &rarr; [0.89, 0.31, ...]</div>
+            </div>
+          </div>
+        `,
+        explain: "Every extracted frame is transformed into a 512-dimensional vector. Notice that Frame 0.0s and Frame 1.0s have nearly identical vector coordinates because the camera is looking at the same scene."
+      },
+      {
+        title: "Step 3: Dynamic Moment Clustering & Medoid Selection",
+        html: `
+          <div style="text-align: center;">
+            <div style="font-weight: 700; color: #15803d; margin-bottom: 6px;">[Anchor-Based Scene Boundary Detection]</div>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+              <div style="background: #f0fdf4; border: 2px solid #22c55e; border-radius: 8px; padding: 10px 16px;">
+                <div style="font-weight: bold; color: #166534;">Moment #0 [0.0s - 4.5s]</div>
+                <div style="font-size: 0.8rem; color: #15803d;">Puppy on Beach (Medoid: Frame 2.0s)</div>
+              </div>
+              <div style="background: #f8fafc; border: 2px dashed #94a3b8; border-radius: 8px; padding: 10px 16px;">
+                <div style="font-weight: bold; color: #334155;">Moment #1 [4.5s - 9.0s]</div>
+                <div style="font-size: 0.8rem; color: #64748b;">Frisbee Throw (Medoid: Frame 6.0s)</div>
+              </div>
+            </div>
+          </div>
+        `,
+        explain: "Frames with cosine similarity > 0.90 are merged into continuous temporal scenes. PurpleDB computes the 'medoid' (the single frame most central to the entire scene) to use as the thumbnail."
+      },
+      {
+        title: "Step 4: Atomic Commit to WiscKey & LSM",
+        html: `
+          <div style="text-align: center;">
+            <div style="font-weight: 700; color: #7c3aed; margin-bottom: 6px;">[Dual Write: Vector Segment + LSM WAL]</div>
+            <div style="display: flex; gap: 14px; justify-content: center;">
+              <div style="background: #ede9fe; border: 2px solid #7c3aed; border-radius: 8px; padding: 10px 14px;">
+                <div style="font-weight: bold; color: #5b21b6;">.vec Segment File</div>
+                <div style="font-size: 0.8rem; color: #6d28d9;">Raw 512-dim Float Vectors</div>
+              </div>
+              <div style="background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 10px 14px;">
+                <div style="font-weight: bold; color: #92400e;">LSM Engine (WAL)</div>
+                <div style="font-size: 0.8rem; color: #78350f;">Timestamp Metadata + Pointers</div>
+              </div>
+            </div>
+          </div>
+        `,
+        explain: "The vector payload is written to the append-only .vec segment. The moment metadata and pointer are atomically committed to the LSM Write-Ahead Log. Durable on disk!"
+      }
+    ];
+
+    let currentIngestStep = 0;
+
+    function renderIngestStep() {
+      const step = ingestSteps[currentIngestStep];
+      document.getElementById('ingestCanvas').innerHTML = `
+        <div style="width: 100%;">
+          <div style="text-align: center; font-weight: 800; font-size: 1.15rem; color: var(--text-main); margin-bottom: 12px;">
+            ${step.title}
+          </div>
+          ${step.html}
+        </div>
+      `;
+      document.getElementById('ingestExplain').innerHTML = `
+        <strong>Step ${currentIngestStep + 1} of ${ingestSteps.length}</strong>: ${step.explain}
+      `;
+    }
+
+    function nextIngestStep() {
+      if (currentIngestStep < ingestSteps.length - 1) {
+        currentIngestStep++;
+        renderIngestStep();
+      }
+    }
+
+    function prevIngestStep() {
+      if (currentIngestStep > 0) {
+        currentIngestStep--;
+        renderIngestStep();
+      }
+    }
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', () => {
+      drawVectors();
+      renderIngestStep();
+    });
+  </script>
+</body>
+</html>

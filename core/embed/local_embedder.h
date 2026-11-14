@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/embed/embedder.h"
+#include <cstddef>
 #include <string>
 #include <vector>
 

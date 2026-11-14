@@ -1,4 +1,5 @@
 CompileFlags:
+  CompilationDatabase: "C:/Users/vinay/OneDrive/Desktop/Purpled"
   Add:
     - -std=c++17
     - -IC:/Users/vinay/OneDrive/Desktop/Purpled

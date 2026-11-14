@@ -198,3 +198,4 @@ def open(
         hnsw_ef_search=hnsw_ef_search,
         fps=fps,
     )
+

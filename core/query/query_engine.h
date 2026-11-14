@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <shared_mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/embed/embedder.h"

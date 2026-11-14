@@ -1,6 +1,7 @@
 #include "core/pipeline/frame_decoder.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>

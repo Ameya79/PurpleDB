@@ -14,6 +14,7 @@
 #include "core/util/coding.h"
 #include "core/util/sha256.h"
 #include "core/vector/vector_index.h"
+#include "purpledb/slice.h"
 #include "purpledb/status.h"
 
 namespace purpledb {

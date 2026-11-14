@@ -100,3 +100,4 @@ if __name__ == "__main__":
         import shutil
         shutil.rmtree("./test_django_db", ignore_errors=True)
     print("Django integration pattern verified.")
+
