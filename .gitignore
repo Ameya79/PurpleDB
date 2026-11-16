@@ -45,3 +45,6 @@ $RECYCLE.BIN/
 .DS_Store
 .idea/
 .vscode/
+
+# Gemini agent rules
+.gemini/
